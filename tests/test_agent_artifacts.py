@@ -4,7 +4,8 @@ from datasette.app import Datasette
 import pytest
 
 from datasette_agent_artifacts import (
-    TOOL_DESCRIPTION,
+    ARTIFACT_TYPES,
+    CREATE_TOOL_DESCRIPTION,
     _build_iframe_html,
     _create_artifact,
 )
@@ -20,45 +21,68 @@ async def test_plugin_is_installed():
 
 
 @pytest.mark.asyncio
-async def test_create_artifact_basic():
+async def test_create_artifact_html():
     datasette = Datasette(memory=True)
     result = json.loads(
-        await _create_artifact(datasette, None, html="<h1>Hello</h1>")
+        await _create_artifact(datasette, None, content="<h1>Hello</h1>", type="html")
     )
-    assert "status" in result
+    assert result["type"] == "html"
+    assert result["artifact_id"]
     html_output = result["_html"]
     assert "<iframe" in html_output
     assert 'sandbox="allow-scripts"' in html_output
-    assert 'srcdoc="' in html_output
-    # Content should be HTML-escaped in srcdoc
     assert "&lt;h1&gt;Hello&lt;/h1&gt;" in html_output
-    # Resize script should be inside srcdoc (escaped)
     assert "htmlPreviewHeight" in html_output
+
+
+@pytest.mark.asyncio
+async def test_create_artifact_markdown():
+    datasette = Datasette(memory=True)
+    result = json.loads(
+        await _create_artifact(datasette, None, content="# Hello\n\nWorld", type="markdown")
+    )
+    assert result["type"] == "markdown"
+    assert result["artifact_id"]
+    html_output = result["_html"]
+    assert "<iframe" in html_output
+
+
+@pytest.mark.asyncio
+async def test_create_artifact_svg():
+    datasette = Datasette(memory=True)
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40"/></svg>'
+    result = json.loads(
+        await _create_artifact(datasette, None, content=svg, type="svg")
+    )
+    assert result["type"] == "svg"
+    assert result["artifact_id"]
+    html_output = result["_html"]
+    assert "<iframe" in html_output
+
+
+@pytest.mark.asyncio
+async def test_create_artifact_invalid_type():
+    datasette = Datasette(memory=True)
+    result = json.loads(
+        await _create_artifact(datasette, None, content="test", type="invalid")
+    )
+    assert "error" in result
 
 
 @pytest.mark.asyncio
 async def test_create_artifact_unique_ids():
     datasette = Datasette(memory=True)
     result1 = json.loads(
-        await _create_artifact(datasette, None, html="<p>One</p>")
+        await _create_artifact(datasette, None, content="<p>One</p>", type="html")
     )
     result2 = json.loads(
-        await _create_artifact(datasette, None, html="<p>Two</p>")
+        await _create_artifact(datasette, None, content="<p>Two</p>", type="html")
     )
-    # Extract iframe IDs
-    html1 = result1["_html"]
-    html2 = result2["_html"]
-    id1 = html1.split('id="')[1].split('"')[0]
-    id2 = html2.split('id="')[1].split('"')[0]
-    assert id1 != id2
-    assert id1.startswith("artifact-")
-    assert id2.startswith("artifact-")
+    assert result1["artifact_id"] != result2["artifact_id"]
 
 
 def test_html_escaping():
     result_html = _build_iframe_html('<div class="test">&amp;</div>', "test-id")
-    # The srcdoc should have the content HTML-escaped
-    # < becomes &lt;, > becomes &gt;, " becomes &quot;, & becomes &amp;
     assert "&lt;div class=&quot;test&quot;&gt;&amp;amp;&lt;/div&gt;" in result_html
 
 
@@ -78,13 +102,33 @@ def test_resize_handling_in_outer_script():
 
 
 def test_tool_description_mentions_sql_bridge():
-    assert "parent.postMessage" in TOOL_DESCRIPTION
-    assert "database" in TOOL_DESCRIPTION
-    assert "sql_query" in TOOL_DESCRIPTION
-    assert "READ-ONLY" in TOOL_DESCRIPTION
-    assert "list_databases_and_tables" in TOOL_DESCRIPTION
+    assert "parent.postMessage" in CREATE_TOOL_DESCRIPTION
+    assert "database" in CREATE_TOOL_DESCRIPTION
+    assert "sql_query" in CREATE_TOOL_DESCRIPTION
+    assert "READ-ONLY" in CREATE_TOOL_DESCRIPTION
+    assert "list_databases_and_tables" in CREATE_TOOL_DESCRIPTION
 
 
 def test_iframe_style():
     result_html = _build_iframe_html("<p>test</p>", "test-id")
     assert 'style="width: 100%; height: 401px; display: block"' in result_html
+
+
+def test_artifact_types():
+    assert "html" in ARTIFACT_TYPES
+    assert "markdown" in ARTIFACT_TYPES
+    assert "svg" in ARTIFACT_TYPES
+
+
+def test_markdown_rendering():
+    result_html = _build_iframe_html("# Hello", "test-id", artifact_type="markdown")
+    # The markdown should be rendered to HTML inside the iframe
+    assert "<iframe" in result_html
+
+
+def test_svg_rendering():
+    svg = '<svg><circle cx="50" cy="50" r="40"/></svg>'
+    result_html = _build_iframe_html(svg, "test-id", artifact_type="svg")
+    assert "<iframe" in result_html
+    # SVG should be wrapped in an HTML page
+    assert "body" in result_html

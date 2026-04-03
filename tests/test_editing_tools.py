@@ -8,6 +8,7 @@ from datasette_agent_artifacts import (
     _artifact_view,
     _artifact_str_replace,
     _artifact_insert,
+    _artifact_render,
     _view_lines,
     _str_replace_content,
     _insert_content,
@@ -132,7 +133,7 @@ async def test_artifact_str_replace(datasette):
     )
     assert replace_result["version"] == 2
     assert replace_result["artifact_id"] == artifact_id
-    assert "_html" in replace_result
+    assert "_html" not in replace_result
 
     # Verify the content was updated
     view_result = json.loads(
@@ -196,7 +197,7 @@ async def test_artifact_insert(datasette):
         )
     )
     assert insert_result["version"] == 2
-    assert "_html" in insert_result
+    assert "_html" not in insert_result
 
     # Verify the content was updated
     view_result = json.loads(
@@ -223,6 +224,7 @@ async def test_artifact_insert_beginning(datasette):
         )
     )
     assert insert_result["version"] == 2
+    assert "_html" not in insert_result
 
     view_result = json.loads(
         await _artifact_view(datasette, None, artifact_id=artifact_id)
@@ -290,9 +292,14 @@ async def test_edit_preserves_type(datasette):
             new_str="Universe",
         )
     )
-    assert "_html" in replace_result
-    # Should still be rendered as markdown (inside an iframe)
-    assert "<iframe" in replace_result["_html"]
+    assert "_html" not in replace_result
+
+    # Render should produce an iframe with markdown styling
+    render_result = json.loads(
+        await _artifact_render(datasette, None, artifact_id=artifact_id)
+    )
+    assert "_html" in render_result
+    assert "<iframe" in render_result["_html"]
 
     view_result = json.loads(
         await _artifact_view(datasette, None, artifact_id=artifact_id)
@@ -324,3 +331,49 @@ async def test_edit_svg_artifact(datasette):
     )
     assert view_result["type"] == "svg"
     assert 'fill="blue"' in view_result["content"]
+
+
+@pytest.mark.asyncio
+async def test_artifact_render(datasette):
+    result = json.loads(
+        await _create_artifact(datasette, None, content="<h1>Hello</h1>", type="html")
+    )
+    artifact_id = result["artifact_id"]
+
+    render_result = json.loads(
+        await _artifact_render(datasette, None, artifact_id=artifact_id)
+    )
+    assert "_html" in render_result
+    assert "<iframe" in render_result["_html"]
+    assert render_result["artifact_id"] == artifact_id
+
+
+@pytest.mark.asyncio
+async def test_artifact_render_not_found(datasette):
+    await ensure_tables(datasette)
+    render_result = json.loads(
+        await _artifact_render(datasette, None, artifact_id="nonexistent")
+    )
+    assert "error" in render_result
+
+
+@pytest.mark.asyncio
+async def test_edit_then_render(datasette):
+    """Edit tools don't render; artifact_render does."""
+    result = json.loads(
+        await _create_artifact(datasette, None, content="<p>old</p>", type="html")
+    )
+    artifact_id = result["artifact_id"]
+
+    # Edit without rendering
+    r1 = json.loads(
+        await _artifact_str_replace(datasette, None, artifact_id=artifact_id, old_str="old", new_str="new")
+    )
+    assert "_html" not in r1
+
+    # Render shows updated content
+    render = json.loads(
+        await _artifact_render(datasette, None, artifact_id=artifact_id)
+    )
+    assert "_html" in render
+    assert "&lt;p&gt;new&lt;/p&gt;" in render["_html"]

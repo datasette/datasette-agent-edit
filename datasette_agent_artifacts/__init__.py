@@ -313,14 +313,11 @@ async def _artifact_str_replace(datasette, actor, artifact_id, old_str, new_str)
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
-    iframe_id = f"artifact-{artifact_id[:12].lower()}"
-    result_html = _build_iframe_html(new_content, iframe_id, artifact_type=artifact_type)
     return json.dumps(
         {
-            "_html": result_html,
             "artifact_id": artifact_id,
             "version": new_version,
-            "status": "Replacement applied",
+            "status": "Replacement applied. Call artifact_render to display the updated artifact.",
         }
     )
 
@@ -334,14 +331,29 @@ async def _artifact_insert(datasette, actor, artifact_id, insert_line, insert_te
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
+    return json.dumps(
+        {
+            "artifact_id": artifact_id,
+            "version": new_version,
+            "status": f"Inserted text after line {insert_line}. Call artifact_render to display the updated artifact.",
+        }
+    )
+
+
+async def _artifact_render(datasette, actor, artifact_id):
+    await ensure_tables(datasette)
+    try:
+        artifact_type, current_content = await _get_artifact(datasette, artifact_id)
+    except ValueError as e:
+        return json.dumps({"error": str(e)})
+
     iframe_id = f"artifact-{artifact_id[:12].lower()}"
-    result_html = _build_iframe_html(new_content, iframe_id, artifact_type=artifact_type)
+    result_html = _build_iframe_html(current_content, iframe_id, artifact_type=artifact_type)
     return json.dumps(
         {
             "_html": result_html,
             "artifact_id": artifact_id,
-            "version": new_version,
-            "status": f"Inserted text after line {insert_line}",
+            "status": "Artifact rendered",
         }
     )
 
@@ -358,8 +370,10 @@ first 20 lines, "50,-1" shows from line 50 to the end."""
 ARTIFACT_STR_REPLACE_DESCRIPTION = """\
 Replace an exact string in an existing artifact. The old_str must \
 appear exactly once in the artifact (if it appears multiple times, provide \
-more surrounding context to make it unique). A new version is created and \
-the updated artifact is re-rendered.
+more surrounding context to make it unique). A new version is created.
+
+This tool does NOT re-render the artifact. Make all your edits first, \
+then call artifact_render once when you are done to display the result.
 
 Use artifact_view first to see the current content with line numbers, \
 then use this tool to make targeted replacements."""
@@ -367,9 +381,17 @@ then use this tool to make targeted replacements."""
 ARTIFACT_INSERT_DESCRIPTION = """\
 Insert text after a given line number in an existing artifact. \
 Use insert_line=0 to insert at the very beginning of the file. A new \
-version is created and the updated artifact is re-rendered.
+version is created.
+
+This tool does NOT re-render the artifact. Make all your edits first, \
+then call artifact_render once when you are done to display the result.
 
 Use artifact_view first to see the current content with line numbers."""
+
+ARTIFACT_RENDER_DESCRIPTION = """\
+Render an existing artifact and display it to the user. Call this after \
+you have finished making edits with artifact_str_replace or \
+artifact_insert. Only call this once, after all edits are complete."""
 
 
 @hookimpl
@@ -461,5 +483,20 @@ def register_agent_tools(datasette):
                 "required": ["artifact_id", "insert_line", "insert_text"],
             },
             fn=_artifact_insert,
+        ),
+        AgentTool(
+            name="artifact_render",
+            description=ARTIFACT_RENDER_DESCRIPTION,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "artifact_id": {
+                        "type": "string",
+                        "description": "The artifact ID to render",
+                    },
+                },
+                "required": ["artifact_id"],
+            },
+            fn=_artifact_render,
         ),
     ]

@@ -340,6 +340,49 @@ async def _artifact_insert(datasette, actor, artifact_id, insert_line, insert_te
     )
 
 
+async def _artifact_edit(datasette, actor, artifact_id, edits):
+    """Apply multiple edits in a single version bump and render the result."""
+    await ensure_tables(datasette)
+    try:
+        artifact_type, current_content = await _get_artifact(datasette, artifact_id)
+    except ValueError as e:
+        return json.dumps({"error": str(e)})
+
+    applied = []
+    for i, edit in enumerate(edits):
+        op = edit.get("operation")
+        try:
+            if op == "str_replace":
+                current_content = _str_replace_content(
+                    current_content, edit["old_str"], edit["new_str"]
+                )
+                applied.append(f"str_replace #{i + 1}: OK")
+            elif op == "insert":
+                current_content = _insert_content(
+                    current_content, edit["insert_line"], edit["insert_text"]
+                )
+                applied.append(f"insert #{i + 1}: OK")
+            else:
+                return json.dumps(
+                    {"error": f"Edit #{i + 1}: unknown operation '{op}'. Use 'str_replace' or 'insert'."}
+                )
+        except ValueError as e:
+            return json.dumps({"error": f"Edit #{i + 1} failed: {e}", "applied": applied})
+
+    new_version = await _save_new_version(datasette, artifact_id, current_content)
+    iframe_id = f"artifact-{artifact_id[:12].lower()}"
+    result_html = _build_iframe_html(current_content, iframe_id, artifact_type=artifact_type)
+    return json.dumps(
+        {
+            "_html": result_html,
+            "artifact_id": artifact_id,
+            "version": new_version,
+            "edits_applied": len(applied),
+            "status": f"Applied {len(applied)} edits and rendered artifact.",
+        }
+    )
+
+
 async def _artifact_render(datasette, actor, artifact_id):
     await ensure_tables(datasette)
     try:
@@ -387,6 +430,22 @@ This tool does NOT re-render the artifact. Make all your edits first, \
 then call artifact_render once when you are done to display the result.
 
 Use artifact_view first to see the current content with line numbers."""
+
+ARTIFACT_EDIT_DESCRIPTION = """\
+Apply multiple edits to an artifact in a single operation and render \
+the result. This is more efficient than calling artifact_str_replace \
+or artifact_insert multiple times — all edits are applied as one \
+version and the artifact is rendered once.
+
+Pass an array of edits. Each edit is an object with an "operation" \
+field ("str_replace" or "insert") and the corresponding parameters:
+
+For str_replace: {"operation": "str_replace", "old_str": "...", "new_str": "..."}
+For insert: {"operation": "insert", "insert_line": N, "insert_text": "..."}
+
+Edits are applied sequentially, so later edits see the result of \
+earlier ones. If any edit fails, the remaining edits are skipped \
+and no version is saved."""
 
 ARTIFACT_RENDER_DESCRIPTION = """\
 Render an existing artifact and display it to the user. Call this after \
@@ -483,6 +542,52 @@ def register_agent_tools(datasette):
                 "required": ["artifact_id", "insert_line", "insert_text"],
             },
             fn=_artifact_insert,
+        ),
+        AgentTool(
+            name="artifact_edit",
+            description=ARTIFACT_EDIT_DESCRIPTION,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "artifact_id": {
+                        "type": "string",
+                        "description": "The artifact ID to edit",
+                    },
+                    "edits": {
+                        "type": "array",
+                        "description": "Array of edit operations to apply sequentially",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "operation": {
+                                    "type": "string",
+                                    "enum": ["str_replace", "insert"],
+                                    "description": "The edit operation type",
+                                },
+                                "old_str": {
+                                    "type": "string",
+                                    "description": "For str_replace: the exact text to find",
+                                },
+                                "new_str": {
+                                    "type": "string",
+                                    "description": "For str_replace: the replacement text",
+                                },
+                                "insert_line": {
+                                    "type": "integer",
+                                    "description": "For insert: line number after which to insert",
+                                },
+                                "insert_text": {
+                                    "type": "string",
+                                    "description": "For insert: the text to insert",
+                                },
+                            },
+                            "required": ["operation"],
+                        },
+                    },
+                },
+                "required": ["artifact_id", "edits"],
+            },
+            fn=_artifact_edit,
         ),
         AgentTool(
             name="artifact_render",

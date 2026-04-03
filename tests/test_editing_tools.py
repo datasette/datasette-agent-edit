@@ -8,6 +8,7 @@ from datasette_agent_artifacts import (
     _artifact_view,
     _artifact_str_replace,
     _artifact_insert,
+    _artifact_edit,
     _artifact_render,
     _view_lines,
     _str_replace_content,
@@ -377,3 +378,104 @@ async def test_edit_then_render(datasette):
     )
     assert "_html" in render
     assert "&lt;p&gt;new&lt;/p&gt;" in render["_html"]
+
+
+@pytest.mark.asyncio
+async def test_artifact_edit_batch(datasette):
+    """Multiple edits applied in one call, one version, one render."""
+    result = json.loads(
+        await _create_artifact(datasette, None, content="<h1>Hello</h1>\n<p>World</p>\n", type="html")
+    )
+    artifact_id = result["artifact_id"]
+
+    edit_result = json.loads(
+        await _artifact_edit(
+            datasette, None,
+            artifact_id=artifact_id,
+            edits=[
+                {"operation": "str_replace", "old_str": "Hello", "new_str": "Goodbye"},
+                {"operation": "str_replace", "old_str": "World", "new_str": "Universe"},
+            ],
+        )
+    )
+    assert edit_result["edits_applied"] == 2
+    assert edit_result["version"] == 2
+    assert "_html" in edit_result
+
+    # Verify both edits applied
+    view = json.loads(await _artifact_view(datasette, None, artifact_id=artifact_id))
+    assert "Goodbye" in view["content"]
+    assert "Universe" in view["content"]
+    assert "Hello" not in view["content"]
+    assert "World" not in view["content"]
+
+
+@pytest.mark.asyncio
+async def test_artifact_edit_with_insert(datasette):
+    result = json.loads(
+        await _create_artifact(datasette, None, content="line1\nline2\n", type="html")
+    )
+    artifact_id = result["artifact_id"]
+
+    edit_result = json.loads(
+        await _artifact_edit(
+            datasette, None,
+            artifact_id=artifact_id,
+            edits=[
+                {"operation": "str_replace", "old_str": "line1", "new_str": "first"},
+                {"operation": "insert", "insert_line": 1, "insert_text": "middle\n"},
+            ],
+        )
+    )
+    assert edit_result["edits_applied"] == 2
+    assert edit_result["version"] == 2
+
+    view = json.loads(await _artifact_view(datasette, None, artifact_id=artifact_id))
+    assert "1:\tfirst" in view["content"]
+    assert "2:\tmiddle" in view["content"]
+    assert "3:\tline2" in view["content"]
+
+
+@pytest.mark.asyncio
+async def test_artifact_edit_partial_failure(datasette):
+    """If an edit fails, earlier edits are NOT saved."""
+    result = json.loads(
+        await _create_artifact(datasette, None, content="<p>hello</p>", type="html")
+    )
+    artifact_id = result["artifact_id"]
+
+    edit_result = json.loads(
+        await _artifact_edit(
+            datasette, None,
+            artifact_id=artifact_id,
+            edits=[
+                {"operation": "str_replace", "old_str": "hello", "new_str": "bye"},
+                {"operation": "str_replace", "old_str": "nonexistent", "new_str": "x"},
+            ],
+        )
+    )
+    assert "error" in edit_result
+    assert "Edit #2 failed" in edit_result["error"]
+    assert edit_result["applied"] == ["str_replace #1: OK"]
+
+    # Content should be unchanged (no version saved)
+    view = json.loads(await _artifact_view(datasette, None, artifact_id=artifact_id))
+    assert "hello" in view["content"]
+
+
+@pytest.mark.asyncio
+async def test_artifact_edit_unknown_operation(datasette):
+    result = json.loads(
+        await _create_artifact(datasette, None, content="test", type="html")
+    )
+    artifact_id = result["artifact_id"]
+
+    edit_result = json.loads(
+        await _artifact_edit(
+            datasette, None,
+            artifact_id=artifact_id,
+            edits=[{"operation": "delete"}],
+        )
+    )
+    assert "error" in edit_result
+    assert "unknown operation" in edit_result["error"]

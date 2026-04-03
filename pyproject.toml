@@ -35,6 +35,9 @@ CI = "https://github.com/datasette/datasette-agent-artifacts/actions"
 [project.entry-points.datasette]
 agent_artifacts = "datasette_agent_artifacts"
 
+[tool.setuptools.package-data]
+datasette_agent_artifacts = ["static/*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"

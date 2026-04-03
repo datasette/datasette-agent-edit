@@ -1,6 +1,6 @@
 import html as html_module
 import json
-import uuid
+
 
 from datasette import hookimpl
 from ulid import ULID
@@ -99,26 +99,9 @@ RESIZE_SCRIPT = (
     "})();</script>"
 )
 
-OUTER_SCRIPT_TEMPLATE = """\
-<script>
-(function(){{
-  window.addEventListener("message", function(e){{
-    var iframe = document.getElementById("{iframe_id}");
-    if (!iframe || e.source !== iframe.contentWindow) return;
-    if (e.data && e.data.htmlPreviewHeight){{
-      var newH = e.data.htmlPreviewHeight + "px";
-      if (iframe.style.height !== newH) iframe.style.height = newH;
-    }}
-    if (e.data && e.data.sql && e.data.database){{
-      var msg = e.data;
-      fetch("/" + msg.database + "/-/query.json?sql=" + encodeURIComponent(msg.sql) + "&_shape=array")
-        .then(function(r){{ return r.json() }})
-        .then(function(data){{ var r = {{results: data}}; if (msg.requestId) r.requestId = msg.requestId; iframe.contentWindow.postMessage(r, "*") }})
-        .catch(function(err){{ var r = {{error: err.message}}; if (msg.requestId) r.requestId = msg.requestId; iframe.contentWindow.postMessage(r, "*") }})
-    }}
-  }});
-}})();
-</script>"""
+BRIDGE_SCRIPT_TAG = (
+    '<script src="/-/static-plugins/datasette-agent-artifacts/artifact-bridge.js"></script>'
+)
 
 MARKDOWN_TEMPLATE = """\
 <!DOCTYPE html>
@@ -154,7 +137,7 @@ def _render_markdown(content):
     return MARKDOWN_TEMPLATE.format(markdown_json=markdown_json)
 
 
-def _build_iframe_html(content, iframe_id, artifact_type="html"):
+def _build_iframe_html(content, artifact_type="html"):
     """Build the iframe HTML for any artifact type."""
     if artifact_type == "markdown":
         inner_html = _render_markdown(content)
@@ -169,13 +152,13 @@ def _build_iframe_html(content, iframe_id, artifact_type="html"):
 
     full_inner_html = inner_html + RESIZE_SCRIPT
     escaped_html = html_module.escape(full_inner_html, quote=True)
-    outer_script = OUTER_SCRIPT_TEMPLATE.format(iframe_id=iframe_id)
     iframe_tag = (
-        f'<iframe id="{iframe_id}" srcdoc="{escaped_html}" '
+        f'{BRIDGE_SCRIPT_TAG}\n'
+        f'<iframe class="artifact-iframe" srcdoc="{escaped_html}" '
         f'sandbox="allow-scripts" '
         f'style="width: 100%; height: 401px; display: block"></iframe>'
     )
-    return outer_script + "\n" + iframe_tag
+    return iframe_tag
 
 
 def _view_lines(content, view_range=""):
@@ -279,7 +262,6 @@ async def _create_artifact(datasette, actor, content, type="html"):
 
     ulid_str = str(ULID())
     ext_id = _external_id(ulid_str)
-    iframe_id = f"iframe-{uuid.uuid4().hex[:12]}"
 
     await db.execute_write(
         "INSERT INTO datasette_agent_artifacts "
@@ -293,7 +275,7 @@ async def _create_artifact(datasette, actor, content, type="html"):
         [ulid_str, content, now],
     )
 
-    result_html = _build_iframe_html(content, iframe_id, artifact_type=type)
+    result_html = _build_iframe_html(content, artifact_type=type)
     return json.dumps(
         {
             "_html": result_html,
@@ -390,8 +372,7 @@ async def _artifact_edit(datasette, actor, artifact_id, edits):
             return json.dumps({"error": f"Edit #{i + 1} failed: {e}", "applied": applied})
 
     new_version = await _save_new_version(datasette, db_id, current_content)
-    iframe_id = f"iframe-{uuid.uuid4().hex[:12]}"
-    result_html = _build_iframe_html(current_content, iframe_id, artifact_type=artifact_type)
+    result_html = _build_iframe_html(current_content, artifact_type=artifact_type)
     return json.dumps(
         {
             "_html": result_html,
@@ -411,8 +392,7 @@ async def _artifact_render(datasette, actor, artifact_id):
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
-    iframe_id = f"iframe-{uuid.uuid4().hex[:12]}"
-    result_html = _build_iframe_html(current_content, iframe_id, artifact_type=artifact_type)
+    result_html = _build_iframe_html(current_content, artifact_type=artifact_type)
     return json.dumps(
         {
             "_html": result_html,

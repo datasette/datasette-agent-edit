@@ -93,23 +93,19 @@ async def test_create_artifact_unique_ids():
 
 
 def test_html_escaping():
-    result_html = _build_iframe_html('<div class="test">&amp;</div>', "test-id")
+    result_html = _build_iframe_html('<div class="test">&amp;</div>')
     assert "&lt;div class=&quot;test&quot;&gt;&amp;amp;&lt;/div&gt;" in result_html
 
 
-def test_sql_bridge_in_outer_script():
-    result_html = _build_iframe_html("<p>test</p>", "test-id")
-    assert "query.json" in result_html
-    assert "encodeURIComponent(msg.sql)" in result_html
-    assert "msg.database" in result_html
-    assert "msg.requestId" in result_html
-    assert "postMessage" in result_html
+def test_bridge_script_tag():
+    result_html = _build_iframe_html("<p>test</p>")
+    assert "artifact-bridge.js" in result_html
+    assert 'class="artifact-iframe"' in result_html
 
 
-def test_resize_handling_in_outer_script():
-    result_html = _build_iframe_html("<p>test</p>", "test-id")
+def test_resize_script_in_iframe():
+    result_html = _build_iframe_html("<p>test</p>")
     assert "htmlPreviewHeight" in result_html
-    assert 'getElementById("test-id")' in result_html
 
 
 def test_tool_description_mentions_sql_bridge():
@@ -121,7 +117,7 @@ def test_tool_description_mentions_sql_bridge():
 
 
 def test_iframe_style():
-    result_html = _build_iframe_html("<p>test</p>", "test-id")
+    result_html = _build_iframe_html("<p>test</p>")
     assert 'style="width: 100%; height: 401px; display: block"' in result_html
 
 
@@ -132,14 +128,12 @@ def test_artifact_types():
 
 
 def test_markdown_rendering():
-    result_html = _build_iframe_html("# Hello", "test-id", artifact_type="markdown")
-    # The markdown should be rendered to HTML inside the iframe
+    result_html = _build_iframe_html("# Hello", artifact_type="markdown")
     assert "<iframe" in result_html
 
 
 def test_svg_rendering():
     svg = '<svg><circle cx="50" cy="50" r="40"/></svg>'
-    result_html = _build_iframe_html(svg, "test-id", artifact_type="svg")
+    result_html = _build_iframe_html(svg, artifact_type="svg")
     assert "<iframe" in result_html
-    # SVG should be wrapped in an HTML page
     assert "body" in result_html

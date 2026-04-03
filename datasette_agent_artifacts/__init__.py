@@ -1,5 +1,6 @@
 import html as html_module
 import json
+import uuid
 
 from datasette import hookimpl
 from ulid import ULID
@@ -278,7 +279,7 @@ async def _create_artifact(datasette, actor, content, type="html"):
 
     ulid_str = str(ULID())
     ext_id = _external_id(ulid_str)
-    iframe_id = f"iframe-{ulid_str[:12].lower()}"
+    iframe_id = f"iframe-{uuid.uuid4().hex[:12]}"
 
     await db.execute_write(
         "INSERT INTO datasette_agent_artifacts "
@@ -389,7 +390,7 @@ async def _artifact_edit(datasette, actor, artifact_id, edits):
             return json.dumps({"error": f"Edit #{i + 1} failed: {e}", "applied": applied})
 
     new_version = await _save_new_version(datasette, db_id, current_content)
-    iframe_id = f"iframe-{db_id[:12].lower()}"
+    iframe_id = f"iframe-{uuid.uuid4().hex[:12]}"
     result_html = _build_iframe_html(current_content, iframe_id, artifact_type=artifact_type)
     return json.dumps(
         {
@@ -410,7 +411,7 @@ async def _artifact_render(datasette, actor, artifact_id):
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
-    iframe_id = f"iframe-{db_id[:12].lower()}"
+    iframe_id = f"iframe-{uuid.uuid4().hex[:12]}"
     result_html = _build_iframe_html(current_content, iframe_id, artifact_type=artifact_type)
     return json.dumps(
         {

@@ -55,23 +55,21 @@ RESIZE_SCRIPT = (
 OUTER_SCRIPT_TEMPLATE = """\
 <script>
 (function(){{
-  setTimeout(function(){{
+  window.addEventListener("message", function(e){{
     var iframe = document.getElementById("{iframe_id}");
-    if (!iframe) return;
-    window.addEventListener("message", function(e){{
-      if (e.source !== iframe.contentWindow) return;
-      if (e.data && e.data.htmlPreviewHeight){{
-        var newH = e.data.htmlPreviewHeight + "px";
-        if (iframe.style.height !== newH) iframe.style.height = newH;
-      }}
-      if (e.data && e.data.sql && e.data.database){{
-        fetch("/" + e.data.database + "/-/query.json?sql=" + encodeURIComponent(e.data.sql) + "&_shape=array")
-          .then(function(r){{ return r.json() }})
-          .then(function(data){{ iframe.contentWindow.postMessage({{results: data}}, "*") }})
-          .catch(function(err){{ iframe.contentWindow.postMessage({{error: err.message}}, "*") }})
-      }}
-    }});
-  }}, 0);
+    if (!iframe || e.source !== iframe.contentWindow) return;
+    if (e.data && e.data.htmlPreviewHeight){{
+      var newH = e.data.htmlPreviewHeight + "px";
+      if (iframe.style.height !== newH) iframe.style.height = newH;
+    }}
+    if (e.data && e.data.sql && e.data.database){{
+      var msg = e.data;
+      fetch("/" + msg.database + "/-/query.json?sql=" + encodeURIComponent(msg.sql) + "&_shape=array")
+        .then(function(r){{ return r.json() }})
+        .then(function(data){{ var r = {{results: data}}; if (msg.requestId) r.requestId = msg.requestId; iframe.contentWindow.postMessage(r, "*") }})
+        .catch(function(err){{ var r = {{error: err.message}}; if (msg.requestId) r.requestId = msg.requestId; iframe.contentWindow.postMessage(r, "*") }})
+    }}
+  }});
 }})();
 </script>"""
 

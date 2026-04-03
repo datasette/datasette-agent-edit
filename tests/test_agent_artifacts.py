@@ -65,8 +65,9 @@ def test_html_escaping():
 def test_sql_bridge_in_outer_script():
     result_html = _build_iframe_html("<p>test</p>", "test-id")
     assert "query.json" in result_html
-    assert "encodeURIComponent(e.data.sql)" in result_html
-    assert "e.data.database" in result_html
+    assert "encodeURIComponent(msg.sql)" in result_html
+    assert "msg.database" in result_html
+    assert "msg.requestId" in result_html
     assert "postMessage" in result_html
 
 

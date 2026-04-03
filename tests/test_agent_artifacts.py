@@ -70,6 +70,17 @@ async def test_create_artifact_invalid_type():
 
 
 @pytest.mark.asyncio
+async def test_create_artifact_id_prefix_and_tip():
+    datasette = Datasette(memory=True)
+    result = json.loads(
+        await _create_artifact(datasette, None, content="<p>test</p>", type="html")
+    )
+    assert result["artifact_id"].startswith("artifact-")
+    assert "tip" in result
+    assert result["artifact_id"] in result["tip"]
+
+
+@pytest.mark.asyncio
 async def test_create_artifact_unique_ids():
     datasette = Datasette(memory=True)
     result1 = json.loads(

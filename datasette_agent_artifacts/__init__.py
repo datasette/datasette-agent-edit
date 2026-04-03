@@ -5,6 +5,19 @@ from datasette import hookimpl
 from ulid import ULID
 
 ARTIFACT_TYPES = ["html", "markdown", "svg"]
+ARTIFACT_ID_PREFIX = "artifact-"
+
+
+def _external_id(ulid_str):
+    """Convert a raw ULID to the external artifact ID the LLM sees."""
+    return ARTIFACT_ID_PREFIX + ulid_str
+
+
+def _internal_id(external_id):
+    """Strip the artifact- prefix to get the raw ULID for database lookups."""
+    if external_id.startswith(ARTIFACT_ID_PREFIX):
+        return external_id[len(ARTIFACT_ID_PREFIX):]
+    return external_id
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS datasette_agent_artifacts (
@@ -263,36 +276,39 @@ async def _create_artifact(datasette, actor, content, type="html"):
     db = datasette.get_internal_database()
     now = datetime.now(timezone.utc).isoformat()
 
-    artifact_id = str(ULID())
-    iframe_id = f"artifact-{artifact_id[:12].lower()}"
+    ulid_str = str(ULID())
+    ext_id = _external_id(ulid_str)
+    iframe_id = f"iframe-{ulid_str[:12].lower()}"
 
     await db.execute_write(
         "INSERT INTO datasette_agent_artifacts "
         "(id, conversation_id, type, current_version, created_at, updated_at) "
         "VALUES (?, ?, ?, 1, ?, ?)",
-        [artifact_id, "", type, now, now],
+        [ulid_str, "", type, now, now],
     )
     await db.execute_write(
         "INSERT INTO datasette_agent_artifact_versions "
         "(artifact_id, version, content, created_at) VALUES (?, 1, ?, ?)",
-        [artifact_id, content, now],
+        [ulid_str, content, now],
     )
 
     result_html = _build_iframe_html(content, iframe_id, artifact_type=type)
     return json.dumps(
         {
             "_html": result_html,
-            "artifact_id": artifact_id,
+            "artifact_id": ext_id,
             "type": type,
             "status": "Artifact created successfully",
+            "tip": f"Use ID {ext_id} in subsequent tool calls to edit this artifact",
         }
     )
 
 
 async def _artifact_view(datasette, actor, artifact_id, view_range=""):
     await ensure_tables(datasette)
+    db_id = _internal_id(artifact_id)
     try:
-        artifact_type, current_content = await _get_artifact(datasette, artifact_id)
+        artifact_type, current_content = await _get_artifact(datasette, db_id)
     except ValueError as e:
         return json.dumps({"error": str(e)})
     return json.dumps(
@@ -306,10 +322,11 @@ async def _artifact_view(datasette, actor, artifact_id, view_range=""):
 
 async def _artifact_str_replace(datasette, actor, artifact_id, old_str, new_str):
     await ensure_tables(datasette)
+    db_id = _internal_id(artifact_id)
     try:
-        artifact_type, current_content = await _get_artifact(datasette, artifact_id)
+        artifact_type, current_content = await _get_artifact(datasette, db_id)
         new_content = _str_replace_content(current_content, old_str, new_str)
-        new_version = await _save_new_version(datasette, artifact_id, new_content)
+        new_version = await _save_new_version(datasette, db_id, new_content)
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
@@ -324,10 +341,11 @@ async def _artifact_str_replace(datasette, actor, artifact_id, old_str, new_str)
 
 async def _artifact_insert(datasette, actor, artifact_id, insert_line, insert_text):
     await ensure_tables(datasette)
+    db_id = _internal_id(artifact_id)
     try:
-        artifact_type, current_content = await _get_artifact(datasette, artifact_id)
+        artifact_type, current_content = await _get_artifact(datasette, db_id)
         new_content = _insert_content(current_content, insert_line, insert_text)
-        new_version = await _save_new_version(datasette, artifact_id, new_content)
+        new_version = await _save_new_version(datasette, db_id, new_content)
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
@@ -343,8 +361,9 @@ async def _artifact_insert(datasette, actor, artifact_id, insert_line, insert_te
 async def _artifact_edit(datasette, actor, artifact_id, edits):
     """Apply multiple edits in a single version bump and render the result."""
     await ensure_tables(datasette)
+    db_id = _internal_id(artifact_id)
     try:
-        artifact_type, current_content = await _get_artifact(datasette, artifact_id)
+        artifact_type, current_content = await _get_artifact(datasette, db_id)
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
@@ -369,8 +388,8 @@ async def _artifact_edit(datasette, actor, artifact_id, edits):
         except ValueError as e:
             return json.dumps({"error": f"Edit #{i + 1} failed: {e}", "applied": applied})
 
-    new_version = await _save_new_version(datasette, artifact_id, current_content)
-    iframe_id = f"artifact-{artifact_id[:12].lower()}"
+    new_version = await _save_new_version(datasette, db_id, current_content)
+    iframe_id = f"iframe-{db_id[:12].lower()}"
     result_html = _build_iframe_html(current_content, iframe_id, artifact_type=artifact_type)
     return json.dumps(
         {
@@ -385,12 +404,13 @@ async def _artifact_edit(datasette, actor, artifact_id, edits):
 
 async def _artifact_render(datasette, actor, artifact_id):
     await ensure_tables(datasette)
+    db_id = _internal_id(artifact_id)
     try:
-        artifact_type, current_content = await _get_artifact(datasette, artifact_id)
+        artifact_type, current_content = await _get_artifact(datasette, db_id)
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
-    iframe_id = f"artifact-{artifact_id[:12].lower()}"
+    iframe_id = f"iframe-{db_id[:12].lower()}"
     result_html = _build_iframe_html(current_content, iframe_id, artifact_type=artifact_type)
     return json.dumps(
         {

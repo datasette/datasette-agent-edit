@@ -263,12 +263,13 @@ async def test_version_history(datasette):
     assert r3["version"] == 3
 
     # Verify all versions exist in the database
+    from datasette_agent_artifacts import _internal_id
     db = datasette.get_internal_database()
     versions = (
         await db.execute(
             "SELECT version, content FROM datasette_agent_artifact_versions "
             "WHERE artifact_id = ? ORDER BY version",
-            [artifact_id],
+            [_internal_id(artifact_id)],
         )
     ).rows
     assert len(versions) == 3

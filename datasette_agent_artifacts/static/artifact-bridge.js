@@ -161,24 +161,43 @@
     // SQL query bridge
     if (e.data.sql && e.data.database) {
       var msg = e.data;
-      fetch(
+      var url =
         "/" +
-          msg.database +
-          "/-/query.json?sql=" +
-          encodeURIComponent(msg.sql) +
-          "&_shape=array"
-      )
+        msg.database +
+        "/-/query.json?sql=" +
+        encodeURIComponent(msg.sql) +
+        "&_shape=objects";
+      if (msg.params && typeof msg.params === "object" && !Array.isArray(msg.params)) {
+        var keys = Object.keys(msg.params);
+        for (var k = 0; k < keys.length; k++) {
+          url +=
+            "&" +
+            encodeURIComponent(keys[k]) +
+            "=" +
+            encodeURIComponent(msg.params[keys[k]]);
+        }
+      }
+      fetch(url)
         .then(function (r) {
           return r.json();
         })
         .then(function (data) {
-          var r = { results: data };
-          if (msg.requestId) r.requestId = msg.requestId;
+          var r;
+          if (data.ok) {
+            r = {
+              columns: data.columns,
+              rows: data.rows,
+              truncated: !!data.truncated,
+            };
+          } else {
+            r = { error: data.error || "Query failed" };
+          }
+          if (msg.requestId) r._reqId = msg.requestId;
           iframe.contentWindow.postMessage(r, "*");
         })
         .catch(function (err) {
           var r = { error: err.message };
-          if (msg.requestId) r.requestId = msg.requestId;
+          if (msg.requestId) r._reqId = msg.requestId;
           iframe.contentWindow.postMessage(r, "*");
         });
     }

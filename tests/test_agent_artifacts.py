@@ -1,3 +1,4 @@
+import html as html_module
 import json
 
 from datasette.app import Datasette
@@ -6,6 +7,7 @@ import pytest
 from datasette_agent_artifacts import (
     ARTIFACT_TYPES,
     CREATE_TOOL_DESCRIPTION,
+    DATASETTE_SQL_SCRIPT,
     _build_iframe_html,
     _create_artifact,
 )
@@ -109,11 +111,16 @@ def test_resize_script_in_iframe():
 
 
 def test_tool_description_mentions_sql_bridge():
-    assert "parent.postMessage" in CREATE_TOOL_DESCRIPTION
+    assert "datasette.query(" in CREATE_TOOL_DESCRIPTION
     assert "database" in CREATE_TOOL_DESCRIPTION
     assert "sql_query" in CREATE_TOOL_DESCRIPTION
     assert "READ-ONLY" in CREATE_TOOL_DESCRIPTION
     assert "list_databases_and_tables" in CREATE_TOOL_DESCRIPTION
+    assert "await" in CREATE_TOOL_DESCRIPTION
+    assert "result.columns" in CREATE_TOOL_DESCRIPTION
+    assert "result.rows" in CREATE_TOOL_DESCRIPTION
+    assert "result.truncated" in CREATE_TOOL_DESCRIPTION
+    assert "result.error" in CREATE_TOOL_DESCRIPTION
 
 
 def test_iframe_style():
@@ -137,3 +144,31 @@ def test_svg_rendering():
     result_html = _build_iframe_html(svg, artifact_type="svg")
     assert "<iframe" in result_html
     assert "body" in result_html
+
+
+def test_datasette_query_script_injected_for_html():
+    result_html = _build_iframe_html("<p>test</p>", artifact_type="html")
+    assert "datasette" in result_html
+    assert "query" in result_html
+
+
+def test_datasette_query_script_not_injected_for_markdown():
+    result_html = _build_iframe_html("# Hello", artifact_type="markdown")
+    assert "datasette={" not in result_html
+
+
+def test_datasette_query_script_not_injected_for_svg():
+    svg = '<svg><circle cx="50" cy="50" r="40"/></svg>'
+    result_html = _build_iframe_html(svg, artifact_type="svg")
+    assert "datasette={" not in result_html
+
+
+def test_datasette_query_script_before_content():
+    """The datasette.query() helper must be available before artifact scripts run."""
+    content = '<script>datasette.query("db", "SELECT 1")</script>'
+    result_html = _build_iframe_html(content, artifact_type="html")
+    # The script defining datasette.query should appear before the artifact content
+    escaped = html_module.escape(content, quote=True)
+    datasette_pos = result_html.find("datasette=")
+    content_pos = result_html.find(escaped)
+    assert datasette_pos < content_pos

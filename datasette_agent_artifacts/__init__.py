@@ -3,6 +3,7 @@ import json
 
 
 from datasette import hookimpl
+from datasette.utils.asgi import Response
 from ulid import ULID
 
 ARTIFACT_TYPES = ["html", "markdown", "svg"]
@@ -17,8 +18,9 @@ def _external_id(ulid_str):
 def _internal_id(external_id):
     """Strip the artifact- prefix to get the raw ULID for database lookups."""
     if external_id.startswith(ARTIFACT_ID_PREFIX):
-        return external_id[len(ARTIFACT_ID_PREFIX):]
+        return external_id[len(ARTIFACT_ID_PREFIX) :]
     return external_id
+
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS datasette_agent_artifacts (
@@ -101,6 +103,33 @@ Multiple concurrent queries work naturally with Promise.all:
     datasette.query('mydb', 'SELECT * FROM posts'),
   ]);
 
+LLM PROMPT BRIDGE (html type only): Your HTML artifact can send a \
+prompt to the LLM using datasette.prompt(text). This returns a \
+Promise that resolves to a result object:
+
+  const result = await datasette.prompt('Summarize this data...');
+  // result.text = "Here is a summary..."
+
+On error, result.error is set instead:
+
+  const result = await datasette.prompt('...');
+  if (result.error) {
+    console.error(result.error);
+    return;
+  }
+  // use result.text
+
+If you need structured data back from the LLM (e.g. JSON), use \
+prompt engineering: ask for the response in a specific format such \
+as a fenced code block, then parse the result. For example:
+
+  const result = await datasette.prompt(
+    'Convert this to JSON. Respond with ONLY a JSON code block, ' +
+    'no other text.\\n\\nData: ' + rawText
+  );
+  const jsonStr = result.text.match(/```(?:json)?\\n([\\s\\S]*?)\\n```/)[1];
+  const data = JSON.parse(jsonStr);
+
 The tool returns an artifact_id. Use the artifact editing tools \
 (artifact_view, artifact_str_replace, artifact_insert) to modify \
 existing artifacts instead of recreating them from scratch."""
@@ -109,7 +138,7 @@ RESIZE_SCRIPT = (
     "<script>(function(){"
     "var lastH=0;new ResizeObserver(()=>{"
     "var h=document.documentElement.scrollHeight;"
-    "if(h!==lastH){lastH=h;parent.postMessage({htmlPreviewHeight:h},\"*\");}"
+    'if(h!==lastH){lastH=h;parent.postMessage({htmlPreviewHeight:h},"*");}'
     "}).observe(document.documentElement);"
     "})();</script>"
 )
@@ -133,13 +162,20 @@ DATASETTE_SQL_SCRIPT = (
     "if(params)msg.params=params;"
     "parent.postMessage(msg,'*');"
     "});"
+    "},prompt:function(prompt){"
+    "return new Promise(function(resolve){"
+    "var id='_q'+(++_n);"
+    "_cb[id]=function(d){"
+    "if(d.error){resolve({error:d.error});}"
+    "else{resolve({text:d.text});}"
+    "};"
+    "parent.postMessage({prompt:prompt,requestId:id},'*');"
+    "});"
     "}};"
     "})();</script>"
 )
 
-BRIDGE_SCRIPT_TAG = (
-    '<script src="/-/static-plugins/datasette-agent-artifacts/artifact-bridge.js"></script>'
-)
+BRIDGE_SCRIPT_TAG = '<script src="/-/static-plugins/datasette-agent-artifacts/artifact-bridge.js"></script>'
 
 MARKDOWN_TEMPLATE = """\
 <!DOCTYPE html>
@@ -194,7 +230,7 @@ def _build_iframe_html(content, artifact_type="html"):
     full_inner_html = prefix + inner_html + RESIZE_SCRIPT
     escaped_html = html_module.escape(full_inner_html, quote=True)
     iframe_tag = (
-        f'{BRIDGE_SCRIPT_TAG}\n'
+        f"{BRIDGE_SCRIPT_TAG}\n"
         f'<iframe class="artifact-iframe" srcdoc="{escaped_html}" '
         f'sandbox="allow-scripts" '
         f'style="width: 100%; height: 401px; display: block"></iframe>'
@@ -231,9 +267,7 @@ def _str_replace_content(content, old_str, new_str):
     if count == 0:
         raise ValueError("old_str not found in artifact")
     if count > 1:
-        raise ValueError(
-            f"old_str appears {count} times in artifact; must be unique"
-        )
+        raise ValueError(f"old_str appears {count} times in artifact; must be unique")
     return content.replace(old_str, new_str, 1)
 
 
@@ -295,7 +329,11 @@ async def _create_artifact(datasette, actor, content, type="html"):
     from datetime import datetime, timezone
 
     if type not in ARTIFACT_TYPES:
-        return json.dumps({"error": f"Invalid type: {type}. Must be one of: {', '.join(ARTIFACT_TYPES)}"})
+        return json.dumps(
+            {
+                "error": f"Invalid type: {type}. Must be one of: {', '.join(ARTIFACT_TYPES)}"
+            }
+        )
 
     await ensure_tables(datasette)
     db = datasette.get_internal_database()
@@ -407,10 +445,14 @@ async def _artifact_edit(datasette, actor, artifact_id, edits):
                 applied.append(f"insert #{i + 1}: OK")
             else:
                 return json.dumps(
-                    {"error": f"Edit #{i + 1}: unknown operation '{op}'. Use 'str_replace' or 'insert'."}
+                    {
+                        "error": f"Edit #{i + 1}: unknown operation '{op}'. Use 'str_replace' or 'insert'."
+                    }
                 )
         except ValueError as e:
-            return json.dumps({"error": f"Edit #{i + 1} failed: {e}", "applied": applied})
+            return json.dumps(
+                {"error": f"Edit #{i + 1} failed: {e}", "applied": applied}
+            )
 
     new_version = await _save_new_version(datasette, db_id, current_content)
     result_html = _build_iframe_html(current_content, artifact_type=artifact_type)
@@ -646,4 +688,45 @@ def register_agent_tools(datasette):
             },
             fn=_artifact_render,
         ),
+    ]
+
+
+async def prompt_api(request, datasette):
+    if request.method != "POST":
+        return Response.json({"error": "POST required"}, status=405)
+    await datasette.ensure_permission(action="datasette-agent", actor=request.actor)
+    body = json.loads(await request.post_body())
+    prompt_text = body.get("prompt", "").strip()
+    if not prompt_text:
+        return Response.json({"error": "prompt is required"}, status=400)
+
+    from datasette_llm import LLM
+
+    model = await LLM(datasette).model(purpose="artifact-prompt", actor=request.actor)
+    response = await model.prompt(prompt_text)
+    text = await response.text()
+    return Response.json({"text": text})
+
+
+@hookimpl
+def register_routes():
+    return [
+        (r"^/-/artifact-prompt$", prompt_api),
+    ]
+
+
+@hookimpl
+def skip_csrf(scope):
+    return scope["path"] == "/-/artifact-prompt"
+
+
+@hookimpl
+def register_llm_purposes(datasette):
+    from datasette_llm import Purpose
+
+    return [
+        Purpose(
+            name="artifact-prompt",
+            description="LLM prompts executed from within artifacts",
+        )
     ]

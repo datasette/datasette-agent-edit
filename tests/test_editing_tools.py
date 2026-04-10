@@ -16,7 +16,6 @@ from datasette_agent_artifacts import (
     ensure_tables,
 )
 
-
 # --- Pure function tests ---
 
 
@@ -79,7 +78,9 @@ def datasette():
 @pytest.mark.asyncio
 async def test_artifact_view(datasette):
     result = json.loads(
-        await _create_artifact(datasette, None, content="<h1>Hello</h1>\n<p>World</p>\n", type="html")
+        await _create_artifact(
+            datasette, None, content="<h1>Hello</h1>\n<p>World</p>\n", type="html"
+        )
     )
     artifact_id = result["artifact_id"]
 
@@ -126,7 +127,8 @@ async def test_artifact_str_replace(datasette):
 
     replace_result = json.loads(
         await _artifact_str_replace(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             old_str="Hello",
             new_str="Goodbye",
@@ -153,7 +155,8 @@ async def test_artifact_str_replace_not_found(datasette):
 
     replace_result = json.loads(
         await _artifact_str_replace(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             old_str="xyz",
             new_str="abc",
@@ -166,13 +169,16 @@ async def test_artifact_str_replace_not_found(datasette):
 @pytest.mark.asyncio
 async def test_artifact_str_replace_ambiguous(datasette):
     result = json.loads(
-        await _create_artifact(datasette, None, content="<p>hello</p><p>hello</p>", type="html")
+        await _create_artifact(
+            datasette, None, content="<p>hello</p><p>hello</p>", type="html"
+        )
     )
     artifact_id = result["artifact_id"]
 
     replace_result = json.loads(
         await _artifact_str_replace(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             old_str="hello",
             new_str="bye",
@@ -191,7 +197,8 @@ async def test_artifact_insert(datasette):
 
     insert_result = json.loads(
         await _artifact_insert(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             insert_line=1,
             insert_text="new line\n",
@@ -218,7 +225,8 @@ async def test_artifact_insert_beginning(datasette):
 
     insert_result = json.loads(
         await _artifact_insert(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             insert_line=0,
             insert_text="first\n",
@@ -244,7 +252,8 @@ async def test_version_history(datasette):
 
     r2 = json.loads(
         await _artifact_str_replace(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             old_str="v1",
             new_str="v2",
@@ -254,7 +263,8 @@ async def test_version_history(datasette):
 
     r3 = json.loads(
         await _artifact_str_replace(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             old_str="v2",
             new_str="v3",
@@ -264,6 +274,7 @@ async def test_version_history(datasette):
 
     # Verify all versions exist in the database
     from datasette_agent_artifacts import _internal_id
+
     db = datasette.get_internal_database()
     versions = (
         await db.execute(
@@ -282,13 +293,16 @@ async def test_version_history(datasette):
 async def test_edit_preserves_type(datasette):
     """Editing a markdown artifact should re-render as markdown."""
     result = json.loads(
-        await _create_artifact(datasette, None, content="# Hello\n\nWorld", type="markdown")
+        await _create_artifact(
+            datasette, None, content="# Hello\n\nWorld", type="markdown"
+        )
     )
     artifact_id = result["artifact_id"]
 
     replace_result = json.loads(
         await _artifact_str_replace(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             old_str="World",
             new_str="Universe",
@@ -320,7 +334,8 @@ async def test_edit_svg_artifact(datasette):
 
     replace_result = json.loads(
         await _artifact_str_replace(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             old_str='fill="red"',
             new_str='fill="blue"',
@@ -369,7 +384,9 @@ async def test_edit_then_render(datasette):
 
     # Edit without rendering
     r1 = json.loads(
-        await _artifact_str_replace(datasette, None, artifact_id=artifact_id, old_str="old", new_str="new")
+        await _artifact_str_replace(
+            datasette, None, artifact_id=artifact_id, old_str="old", new_str="new"
+        )
     )
     assert "_html" not in r1
 
@@ -385,13 +402,16 @@ async def test_edit_then_render(datasette):
 async def test_artifact_edit_batch(datasette):
     """Multiple edits applied in one call, one version, one render."""
     result = json.loads(
-        await _create_artifact(datasette, None, content="<h1>Hello</h1>\n<p>World</p>\n", type="html")
+        await _create_artifact(
+            datasette, None, content="<h1>Hello</h1>\n<p>World</p>\n", type="html"
+        )
     )
     artifact_id = result["artifact_id"]
 
     edit_result = json.loads(
         await _artifact_edit(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             edits=[
                 {"operation": "str_replace", "old_str": "Hello", "new_str": "Goodbye"},
@@ -420,7 +440,8 @@ async def test_artifact_edit_with_insert(datasette):
 
     edit_result = json.loads(
         await _artifact_edit(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             edits=[
                 {"operation": "str_replace", "old_str": "line1", "new_str": "first"},
@@ -447,7 +468,8 @@ async def test_artifact_edit_partial_failure(datasette):
 
     edit_result = json.loads(
         await _artifact_edit(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             edits=[
                 {"operation": "str_replace", "old_str": "hello", "new_str": "bye"},
@@ -473,7 +495,8 @@ async def test_artifact_edit_unknown_operation(datasette):
 
     edit_result = json.loads(
         await _artifact_edit(
-            datasette, None,
+            datasette,
+            None,
             artifact_id=artifact_id,
             edits=[{"operation": "delete"}],
         )

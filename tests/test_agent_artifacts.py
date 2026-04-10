@@ -41,7 +41,9 @@ async def test_create_artifact_html():
 async def test_create_artifact_markdown():
     datasette = Datasette(memory=True)
     result = json.loads(
-        await _create_artifact(datasette, None, content="# Hello\n\nWorld", type="markdown")
+        await _create_artifact(
+            datasette, None, content="# Hello\n\nWorld", type="markdown"
+        )
     )
     assert result["type"] == "markdown"
     assert result["artifact_id"]
@@ -172,3 +174,106 @@ def test_datasette_query_script_before_content():
     datasette_pos = result_html.find("datasette=")
     content_pos = result_html.find(escaped)
     assert datasette_pos < content_pos
+
+
+def test_datasette_prompt_script_injected_for_html():
+    result_html = _build_iframe_html("<p>test</p>", artifact_type="html")
+    assert "prompt:function" in result_html
+
+
+def test_datasette_prompt_script_not_injected_for_markdown():
+    result_html = _build_iframe_html("# Hello", artifact_type="markdown")
+    assert "prompt:function" not in result_html
+
+
+def test_tool_description_mentions_prompt_bridge():
+    assert "datasette.prompt(" in CREATE_TOOL_DESCRIPTION
+    assert "result.text" in CREATE_TOOL_DESCRIPTION
+    assert "fenced code block" in CREATE_TOOL_DESCRIPTION
+
+
+PROMPT_CONFIG = {
+    "plugins": {
+        "datasette-llm": {
+            "default_model": "echo",
+            "require_keys": False,
+            "purposes": {
+                "artifact-prompt": {
+                    "model": "echo",
+                },
+            },
+        },
+    },
+}
+
+PROMPT_PERMISSIONS = {
+    "permissions": {
+        "datasette-agent": {"id": "user"},
+    },
+}
+
+
+def _prompt_datasette():
+    ds = Datasette(memory=True, metadata=PROMPT_CONFIG, config=PROMPT_PERMISSIONS)
+    return ds, {"ds_actor": ds.client.actor_cookie({"id": "user"})}
+
+
+@pytest.mark.asyncio
+async def test_prompt_api_endpoint():
+    ds, cookies = _prompt_datasette()
+    response = await ds.client.post(
+        "/-/artifact-prompt",
+        content=json.dumps({"prompt": "Hello LLM"}),
+        headers={"Content-Type": "application/json"},
+        cookies=cookies,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    # The echo model returns JSON containing the prompt
+    echo_output = json.loads(data["text"])
+    assert echo_output["prompt"] == "Hello LLM"
+
+
+@pytest.mark.asyncio
+async def test_prompt_api_requires_permission():
+    ds, _ = _prompt_datasette()
+    response = await ds.client.post(
+        "/-/artifact-prompt",
+        content=json.dumps({"prompt": "Hello LLM"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_prompt_api_empty_prompt():
+    ds, cookies = _prompt_datasette()
+    response = await ds.client.post(
+        "/-/artifact-prompt",
+        content=json.dumps({"prompt": ""}),
+        headers={"Content-Type": "application/json"},
+        cookies=cookies,
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "prompt is required"
+
+
+@pytest.mark.asyncio
+async def test_prompt_api_missing_prompt():
+    ds, cookies = _prompt_datasette()
+    response = await ds.client.post(
+        "/-/artifact-prompt",
+        content=json.dumps({}),
+        headers={"Content-Type": "application/json"},
+        cookies=cookies,
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "prompt is required"
+
+
+@pytest.mark.asyncio
+async def test_prompt_api_get_not_allowed():
+    ds = Datasette(memory=True)
+    response = await ds.client.get("/-/artifact-prompt")
+    assert response.status_code == 405
+    assert response.json()["error"] == "POST required"

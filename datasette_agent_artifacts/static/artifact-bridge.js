@@ -1,10 +1,12 @@
 /*
  * Artifact bridge: wires up sandboxed artifact iframes with the parent page.
  *
- * Handles two message types from iframes with class "artifact-iframe":
+ * Handles three message types from iframes with class "artifact-iframe":
  *   1. {htmlPreviewHeight: N} — resize the iframe (capped at 800px)
  *   2. {database, sql} — proxy a SQL query via the Datasette JSON API
- *      and post {results} or {error} back; forwards requestId if present.
+ *      and post {columns, rows} or {error} back; forwards requestId if present.
+ *   3. {prompt} — proxy an LLM prompt via /-/artifact-prompt
+ *      and post {text} or {error} back; forwards requestId if present.
  *
  * Also adds a fullscreen toggle button below each artifact iframe.
  *
@@ -156,6 +158,34 @@
         iframe.style.height = newH;
         iframe.dataset.height = newH;
       }
+    }
+
+    // LLM prompt bridge
+    if (e.data.prompt && !e.data.sql) {
+      var msg = e.data;
+      fetch("/-/artifact-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: msg.prompt }),
+      })
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (data) {
+          var r;
+          if (data.error) {
+            r = { error: data.error };
+          } else {
+            r = { text: data.text };
+          }
+          if (msg.requestId) r._reqId = msg.requestId;
+          iframe.contentWindow.postMessage(r, "*");
+        })
+        .catch(function (err) {
+          var r = { error: err.message };
+          if (msg.requestId) r._reqId = msg.requestId;
+          iframe.contentWindow.postMessage(r, "*");
+        });
     }
 
     // SQL query bridge

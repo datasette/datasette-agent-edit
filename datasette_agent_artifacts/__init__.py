@@ -64,27 +64,42 @@ vector graphics. Pass the complete SVG markup starting with <svg>.
 Design clean, polished output with good typography, spacing, and color.
 
 SQL QUERY BRIDGE (html type only): Your HTML artifact can query the \
-Datasette database. All queries are READ-ONLY.
+Datasette database using the built-in datasette.query() helper. All \
+queries are READ-ONLY.
 
 IMPORTANT: Before embedding SQL in an artifact, first use the sql_query \
 tool to test and prototype your queries. Use list_databases_and_tables \
 to discover available database names and tables.
 
-To execute a SQL query from inside your HTML artifact, call:
-  parent.postMessage({database: 'my_database', sql: 'SELECT ...'}, '*');
+datasette.query(database, sql, params?) returns a Promise that resolves \
+to a result object:
 
-Listen for results with:
-  window.addEventListener('message', function(e) {
-    if (e.data && e.data.results) {
-      // e.data.results is an array of row objects
-    }
-    if (e.data && e.data.error) {
-      // e.data.error is an error message string
-    }
-  });
+  const result = await datasette.query('my_database', 'SELECT * FROM users');
+  // result.columns = ["id", "name"]
+  // result.rows = [{id: 1, name: "Alice"}, {id: 2, name: "Bob"}]
+  // result.truncated = false (true if >1000 results)
 
-You can make multiple SQL queries. Include a requestId in your messages \
-if you need to distinguish responses from different queries.
+On error, result.error is set instead:
+
+  const result = await datasette.query('my_database', 'SELECT ...');
+  if (result.error) {
+    console.error(result.error);
+    return;
+  }
+  // use result.columns, result.rows, result.truncated
+
+Named parameters are supported via a third argument:
+
+  const result = await datasette.query('my_database',
+    'SELECT * FROM users WHERE age > :min_age',
+    {min_age: 25});
+
+Multiple concurrent queries work naturally with Promise.all:
+
+  const [users, posts] = await Promise.all([
+    datasette.query('mydb', 'SELECT * FROM users'),
+    datasette.query('mydb', 'SELECT * FROM posts'),
+  ]);
 
 The tool returns an artifact_id. Use the artifact editing tools \
 (artifact_view, artifact_str_replace, artifact_insert) to modify \
@@ -96,6 +111,29 @@ RESIZE_SCRIPT = (
     "var h=document.documentElement.scrollHeight;"
     "if(h!==lastH){lastH=h;parent.postMessage({htmlPreviewHeight:h},\"*\");}"
     "}).observe(document.documentElement);"
+    "})();</script>"
+)
+
+DATASETTE_SQL_SCRIPT = (
+    "<script>(function(){"
+    "var _n=0,_cb={};"
+    "window.addEventListener('message',function(e){"
+    "if(!e.data||!e.data._reqId)return;"
+    "var f=_cb[e.data._reqId];"
+    "if(f){delete _cb[e.data._reqId];f(e.data);}"
+    "});"
+    "window.datasette={query:function(database,sql,params){"
+    "return new Promise(function(resolve){"
+    "var id='_q'+(++_n);"
+    "_cb[id]=function(d){"
+    "if(d.error){resolve({error:d.error});}"
+    "else{resolve({columns:d.columns,rows:d.rows,truncated:d.truncated});}"
+    "};"
+    "var msg={database:database,sql:sql,requestId:id};"
+    "if(params)msg.params=params;"
+    "parent.postMessage(msg,'*');"
+    "});"
+    "}};"
     "})();</script>"
 )
 
@@ -150,7 +188,10 @@ def _build_iframe_html(content, artifact_type="html"):
     else:
         inner_html = content
 
-    full_inner_html = inner_html + RESIZE_SCRIPT
+    # Inject the datasette.sql() helper for HTML artifacts so it's
+    # available before the artifact's own scripts run.
+    prefix = DATASETTE_SQL_SCRIPT if artifact_type == "html" else ""
+    full_inner_html = prefix + inner_html + RESIZE_SCRIPT
     escaped_html = html_module.escape(full_inner_html, quote=True)
     iframe_tag = (
         f'{BRIDGE_SCRIPT_TAG}\n'

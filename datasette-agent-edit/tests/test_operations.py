@@ -1,0 +1,80 @@
+import pytest
+
+from datasette_agent_edit import (
+    EditApplyError,
+    EditError,
+    apply_edits,
+    insert,
+    str_replace,
+    view_lines,
+)
+
+
+def test_view_lines_basic():
+    content = "line one\nline two\nline three\n"
+    assert view_lines(content) == "1:\tline one\n2:\tline two\n3:\tline three"
+
+
+def test_view_lines_range():
+    assert view_lines("a\nb\nc\nd\ne\n", "2,4") == "2:\tb\n3:\tc\n4:\td"
+
+
+def test_view_lines_range_to_end():
+    assert view_lines("a\nb\nc\nd\ne\n", "3,-1") == "3:\tc\n4:\td\n5:\te"
+
+
+def test_str_replace_basic():
+    assert str_replace("hello world", "hello", "goodbye") == "goodbye world"
+
+
+def test_str_replace_not_found():
+    with pytest.raises(EditError, match="not found"):
+        str_replace("hello world", "xyz", "abc")
+
+
+def test_str_replace_ambiguous():
+    with pytest.raises(ValueError, match="appears 2 times"):
+        str_replace("hello hello", "hello", "bye")
+
+
+def test_insert_basic():
+    assert insert("line1\nline2\n", 1, "new\n") == "line1\nnew\nline2\n"
+
+
+def test_insert_beginning():
+    assert insert("line1\nline2\n", 0, "new\n") == "new\nline1\nline2\n"
+
+
+def test_insert_end():
+    assert insert("line1\nline2\n", 2, "new\n") == "line1\nline2\nnew\n"
+
+
+def test_apply_edits_sequential():
+    content, applied = apply_edits(
+        "<h1>Hello</h1>\n<p>World</p>\n",
+        [
+            {"operation": "str_replace", "old_str": "Hello", "new_str": "Goodbye"},
+            {"operation": "insert", "insert_line": 1, "insert_text": "middle\n"},
+        ],
+    )
+    assert "Goodbye" in content
+    assert "middle" in content
+    assert applied == ["str_replace #1: OK", "insert #2: OK"]
+
+
+def test_apply_edits_partial_failure():
+    with pytest.raises(EditApplyError) as exc:
+        apply_edits(
+            "<p>hello</p>",
+            [
+                {"operation": "str_replace", "old_str": "hello", "new_str": "bye"},
+                {"operation": "str_replace", "old_str": "nope", "new_str": "x"},
+            ],
+        )
+    assert exc.value.index == 1
+    assert exc.value.applied == ["str_replace #1: OK"]
+
+
+def test_apply_edits_unknown_operation():
+    with pytest.raises(EditError, match="unknown operation"):
+        apply_edits("test", [{"operation": "delete"}])

@@ -1,0 +1,115 @@
+"""A filesystem-backed :class:`~datasette_agent_edit.store.EditStore`.
+
+``ref`` is a path relative to a root directory. This backend is unversioned:
+``version`` is the content file's ``mtime_ns``, used purely as a display/
+freshness token. Atomicity within a process comes from a per-store
+``asyncio.Lock`` plus a write-to-temp-then-``os.replace`` swap; blocking file
+I/O is pushed to a worker thread so the event loop is never blocked. For
+cross-process safety you would add an ``fcntl.flock`` around the read/replace,
+which is the disk analogue of the SQLite write transaction.
+"""
+
+import asyncio
+import json
+import os
+
+from ulid import ULID
+
+from ..store import Editable, NotFound, Transform
+
+
+class DiskStore:
+    """Store each piece of content as a file under ``root_dir``.
+
+    Metadata, if any, is written to a ``<path>.meta.json`` sidecar.
+    """
+
+    def __init__(self, root_dir):
+        self.root_dir = os.path.abspath(root_dir)
+        self._lock = asyncio.Lock()
+
+    def _resolve(self, ref):
+        """Resolve ``ref`` to an absolute path, refusing escapes from root."""
+        path = os.path.abspath(os.path.join(self.root_dir, ref))
+        if path != self.root_dir and not path.startswith(self.root_dir + os.sep):
+            raise ValueError(f"ref escapes storage root: {ref!r}")
+        return path
+
+    def _meta_path(self, path):
+        return path + ".meta.json"
+
+    def _read_sync(self, ref):
+        path = self._resolve(ref)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except FileNotFoundError:
+            raise NotFound(ref)
+        metadata = {}
+        meta_path = self._meta_path(path)
+        if os.path.exists(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+        version = os.stat(path).st_mtime_ns
+        return Editable(ref=ref, content=content, metadata=metadata, version=version)
+
+    def _write_sync(self, path, content):
+        """Atomically replace ``path`` with ``content`` (temp file + rename)."""
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = f"{path}.{ULID()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, path)
+
+    async def create(self, content, *, ref=None, metadata=None):
+        ref = ref or str(ULID())
+        metadata = metadata or {}
+        path = self._resolve(ref)
+
+        def _do():
+            if os.path.exists(path):
+                raise FileExistsError(ref)
+            self._write_sync(path, content)
+            if metadata:
+                self._write_sync(self._meta_path(path), json.dumps(metadata))
+            return os.stat(path).st_mtime_ns
+
+        async with self._lock:
+            version = await asyncio.to_thread(_do)
+        return Editable(ref=ref, content=content, metadata=metadata, version=version)
+
+    async def read(self, ref):
+        return await asyncio.to_thread(self._read_sync, ref)
+
+    async def edit(self, ref, transform: Transform):
+        path = self._resolve(ref)
+
+        def _do():
+            current = self._read_sync(ref)  # raises NotFound if missing
+            # Pure, synchronous surgery between read and atomic replace.
+            new_content = transform(current.content)
+            self._write_sync(path, new_content)
+            return Editable(
+                ref=ref,
+                content=new_content,
+                metadata=current.metadata,
+                version=os.stat(path).st_mtime_ns,
+            )
+
+        async with self._lock:
+            return await asyncio.to_thread(_do)
+
+    async def delete(self, ref):
+        path = self._resolve(ref)
+
+        def _do():
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                raise NotFound(ref)
+            meta_path = self._meta_path(path)
+            if os.path.exists(meta_path):
+                os.remove(meta_path)
+
+        async with self._lock:
+            await asyncio.to_thread(_do)

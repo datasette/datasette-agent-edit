@@ -1,16 +1,16 @@
 [project]
-name = "datasette-agent-artifacts"
+name = "datasette-agent-edit"
 version = "0.0.1"
-description = "Add artifacts (inline HTML+JS apps) to Datasette Agent"
+description = "Storage-agnostic file-editing tools (view / str_replace / insert) for Datasette Agent plugins"
 readme = "README.md"
 authors = [{name = "Simon Willison"}]
 license = "Apache-2.0"
-classifiers=[
-    "Framework :: Datasette"
+classifiers = [
+    "Framework :: Datasette",
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "datasette>=1.0a26",
+    "datasette>=1.0a31",
     "python-ulid",
     "typing_extensions",
 ]
@@ -19,30 +19,18 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-asyncio",
-    "datasette-llm",
-    "llm-echo",
-    "datasette-agent",
 ]
-
-[tool.uv.sources]
-datasette-agent = { path = "../datasette-agent", editable = true }
 
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-
 [project.urls]
-Homepage = "https://github.com/datasette/datasette-agent-artifacts"
-Changelog = "https://github.com/datasette/datasette-agent-artifacts/releases"
-Issues = "https://github.com/datasette/datasette-agent-artifacts/issues"
-CI = "https://github.com/datasette/datasette-agent-artifacts/actions"
+Homepage = "https://github.com/datasette/datasette-agent-edit"
+Issues = "https://github.com/datasette/datasette-agent-edit/issues"
 
-[project.entry-points.datasette]
-agent_artifacts = "datasette_agent_artifacts"
-
-[tool.setuptools.package-data]
-datasette_agent_artifacts = ["static/*"]
+[tool.setuptools.packages.find]
+include = ["datasette_agent_edit*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"

@@ -172,13 +172,12 @@ CREATE TABLE IF NOT EXISTS {self.versions_table} (
         await self.ensure_tables()
 
         def _write(conn):
-            cur = conn.execute(
-                f"DELETE FROM {self.table} WHERE id = ?", [ref]
-            )
-            if cur.rowcount == 0:
-                raise NotFound(ref)
+            # Children first, so this also works with foreign_keys enabled.
             conn.execute(
                 f"DELETE FROM {self.versions_table} WHERE object_id = ?", [ref]
             )
+            cur = conn.execute(f"DELETE FROM {self.table} WHERE id = ?", [ref])
+            if cur.rowcount == 0:
+                raise NotFound(ref)
 
         await self.db.execute_write_fn(_write)

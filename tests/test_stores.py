@@ -140,3 +140,26 @@ async def test_disk_version_changes_on_edit(disk_store):
     edited = await disk_store.edit(created.ref, lambda c: c + "b")
     assert edited.version != created.version
     assert edited.content == "ab"
+
+
+# --- Fixes: disk ---
+
+
+@pytest.mark.asyncio
+async def test_disk_edit_preserves_line_endings_and_mode(disk_store, tmp_path):
+    path = tmp_path / "s.sh"
+    path.write_bytes(b"#!/bin/sh\r\necho hi\r\n")
+    path.chmod(0o755)
+    await disk_store.edit("s.sh", lambda c: c.replace("hi", "yo"))
+    assert path.read_bytes() == b"#!/bin/sh\r\necho yo\r\n"
+    assert path.stat().st_mode & 0o777 == 0o755
+    assert (await disk_store.read("s.sh")).content == "#!/bin/sh\r\necho yo\r\n"
+
+
+@pytest.mark.asyncio
+async def test_disk_failed_write_leaves_no_temp_file(disk_store, tmp_path):
+    await disk_store.create("ok", ref="a.txt")
+    with pytest.raises(UnicodeEncodeError):
+        await disk_store.edit("a.txt", lambda c: "\ud800")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.txt"]
+    assert (tmp_path / "a.txt").read_text() == "ok"

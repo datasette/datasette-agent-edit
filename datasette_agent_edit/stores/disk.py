@@ -12,6 +12,7 @@ which is the disk analogue of the SQLite write transaction.
 import asyncio
 import json
 import os
+import stat
 
 from ulid import ULID
 
@@ -21,7 +22,9 @@ from ..store import Editable, NotFound, Transform
 class DiskStore:
     """Store each piece of content as a file under ``root_dir``.
 
-    Metadata, if any, is written to a ``<path>.meta.json`` sidecar.
+    Metadata, if any, is written to a ``<path>.meta.json`` sidecar. Line
+    endings are preserved byte-for-byte and an edited file keeps its
+    permission bits.
     """
 
     def __init__(self, root_dir):
@@ -41,7 +44,8 @@ class DiskStore:
     def _read_sync(self, ref):
         path = self._resolve(ref)
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            # newline="" keeps CRLF (and lone CR) exactly as stored.
+            with open(path, "r", encoding="utf-8", newline="") as f:
                 content = f.read()
         except FileNotFoundError:
             raise NotFound(ref)
@@ -54,12 +58,27 @@ class DiskStore:
         return Editable(ref=ref, content=content, metadata=metadata, version=version)
 
     def _write_sync(self, path, content):
-        """Atomically replace ``path`` with ``content`` (temp file + rename)."""
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        """Atomically replace ``path`` with ``content`` (temp file + rename).
+
+        An existing file keeps its permission bits, and the temp file is
+        removed if anything goes wrong before the swap.
+        """
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = f"{path}.{ULID()}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp, path)
+        try:
+            with open(tmp, "w", encoding="utf-8", newline="") as f:
+                f.write(content)
+            try:
+                os.chmod(tmp, stat.S_IMODE(os.stat(path).st_mode))
+            except FileNotFoundError:
+                pass
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except FileNotFoundError:
+                pass
+            raise
 
     async def create(self, content, *, ref=None, metadata=None):
         ref = ref or str(ULID())

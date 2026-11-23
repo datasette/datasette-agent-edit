@@ -161,3 +161,61 @@ async def test_no_render_hook_omits_render(store):
     assert "_html" not in edit_result
     render_result = json.loads(await toolset.render(ext))
     assert "error" in render_result
+
+
+# --- Fixes: every failure comes back in the JSON envelope ---
+
+
+@pytest.mark.asyncio
+async def test_view_includes_version(store, toolset):
+    ext = await _make(store, toolset, "a\n")
+    viewed = json.loads(await toolset.view(ext))
+    replaced = json.loads(await toolset.str_replace(ext, "a", "b"))
+    assert viewed["version"] != replaced["version"]
+    assert json.loads(await toolset.view(ext))["version"] == replaced["version"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("view_range", ["5", "x,y", "0,2"])
+async def test_view_bad_range_is_error(store, toolset, view_range):
+    ext = await _make(store, toolset, "a\nb\n")
+    assert "view_range" in json.loads(await toolset.view(ext, view_range))["error"]
+
+
+@pytest.mark.asyncio
+async def test_insert_out_of_range_is_error(store, toolset):
+    ext = await _make(store, toolset, "a\nb\n")
+    result = json.loads(await toolset.insert(ext, 99, "x"))
+    assert "out of range" in result["error"]
+    assert (await store.read(toolset.codec.to_internal(ext))).content == "a\nb\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_missing_key_is_error(store, toolset):
+    ext = await _make(store, toolset, "abc")
+    result = json.loads(
+        await toolset.edit(ext, [{"operation": "str_replace", "old_str": "a"}])
+    )
+    assert result["error"].startswith("Edit #1 failed")
+    assert "new_str" in result["error"]
+    assert (await store.read(toolset.codec.to_internal(ext))).content == "abc"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("edits", [[], None, "nope"])
+async def test_edit_requires_edits(store, toolset, edits):
+    ext = await _make(store, toolset, "abc")
+    before = await store.read(toolset.codec.to_internal(ext))
+    assert "non-empty" in json.loads(await toolset.edit(ext, edits))["error"]
+    after = await store.read(toolset.codec.to_internal(ext))
+    assert after.version == before.version
+
+
+@pytest.mark.asyncio
+async def test_disk_store_errors_are_enveloped(tmp_path):
+    (tmp_path / "b.bin").write_bytes(b"\xff\xfe")
+    toolset = EditToolset(DiskStore(tmp_path))
+    assert "escapes" in json.loads(await toolset.view("../x"))["error"]
+    assert "escapes" in json.loads(await toolset.str_replace("../x", "a", "b"))["error"]
+    assert "invalid ref" in json.loads(await toolset.view(""))["error"]
+    assert "UTF-8" in json.loads(await toolset.view("b.bin"))["error"]

@@ -145,6 +145,9 @@ CREATE TABLE IF NOT EXISTS {self.versions_table} (
             # raises (e.g. a failed str_replace) the transaction is rolled
             # back and nothing is persisted.
             new_content = transform(content)
+            if new_content == content:
+                # Nothing changed: don't record an identical version.
+                return current_version, content, json.loads(metadata_json)
             new_version = current_version + 1
             conn.execute(
                 f"INSERT INTO {self.versions_table} "

@@ -153,6 +153,14 @@ async def test_create_duplicate_ref_raises(store):
     assert (await store.read("dup.txt")).content == "one"
 
 
+@pytest.mark.asyncio
+async def test_unchanged_edit_keeps_version(store):
+    created = await store.create("same\n")
+    edited = await store.edit(created.ref, lambda c: c)
+    assert edited.version == created.version
+    assert (await store.read(created.ref)).version == created.version
+
+
 # --- Fixes: SQLite ---
 
 

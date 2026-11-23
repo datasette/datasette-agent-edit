@@ -1,6 +1,6 @@
 [project]
 name = "datasette-agent-edit"
-version = "0.1a0"
+version = "0.2a0"
 description = "Storage-agnostic file-editing tools (view / str_replace / insert) for Datasette Agent plugins"
 readme = "README.md"
 authors = [{name = "Simon Willison"}]

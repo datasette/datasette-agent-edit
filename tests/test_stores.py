@@ -157,6 +157,45 @@ async def test_disk_edit_preserves_line_endings_and_mode(disk_store, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_disk_metadata_sidecar_is_not_addressable(disk_store):
+    await disk_store.create("x", ref="a.txt", metadata={"secret": 1})
+    with pytest.raises(ValueError, match="reserved"):
+        await disk_store.read("a.txt.meta.json")
+    with pytest.raises(ValueError, match="reserved"):
+        await disk_store.edit("a.txt.meta.json", lambda c: "{}")
+
+
+@pytest.mark.asyncio
+async def test_disk_rejects_symlink_escape(disk_store, tmp_path_factory, tmp_path):
+    outside = tmp_path_factory.mktemp("outside")
+    (outside / "o.txt").write_text("outside")
+    (tmp_path / "link").symlink_to(outside)
+    with pytest.raises(ValueError, match="escapes"):
+        await disk_store.read("link/o.txt")
+    with pytest.raises(ValueError, match="escapes"):
+        await disk_store.edit("link/o.txt", lambda c: "pwned")
+    assert (outside / "o.txt").read_text() == "outside"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ref", ["", ".", "sub"])
+async def test_disk_directory_refs_are_not_content(disk_store, tmp_path, ref):
+    (tmp_path / "sub").mkdir()
+    with pytest.raises((ValueError, NotFound)):
+        await disk_store.read(ref)
+    with pytest.raises((ValueError, NotFound)):
+        await disk_store.delete(ref)
+    assert (tmp_path / "sub").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_disk_non_utf8_is_value_error(disk_store, tmp_path):
+    (tmp_path / "b.bin").write_bytes(b"\xff\xfe\x00")
+    with pytest.raises(ValueError, match="UTF-8"):
+        await disk_store.read("b.bin")
+
+
+@pytest.mark.asyncio
 async def test_disk_failed_write_leaves_no_temp_file(disk_store, tmp_path):
     await disk_store.create("ok", ref="a.txt")
     with pytest.raises(UnicodeEncodeError):

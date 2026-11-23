@@ -10,12 +10,7 @@ awaits, the same editing logic is safe inside any of those contexts.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional
-
-try:
-    from typing import Protocol, runtime_checkable
-except ImportError:  # pragma: no cover - py<3.8 fallback
-    from typing_extensions import Protocol, runtime_checkable
+from typing import Any, Awaitable, Callable, Optional, Protocol, runtime_checkable
 
 
 #: A pure, synchronous content transform: old content in, new content out.

@@ -31,11 +31,6 @@ class SqliteVersionedStore:
         Name of the objects table (one row per piece of content).
     versions_table:
         Name of the append-only versions table.
-    metadata_columns:
-        Optional mapping of ``column_name -> metadata_key``. Listed metadata
-        keys are stored in their own columns (and are filterable in SQL);
-        everything else is JSON-encoded into the ``metadata`` column. Defaults
-        to ``{}`` (all metadata goes to JSON).
     validate_metadata:
         Optional callable invoked as ``validate_metadata(metadata)`` on
         ``create``; raise ``ValueError`` to reject invalid metadata.

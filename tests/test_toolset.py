@@ -260,3 +260,26 @@ async def test_render_failure_after_edit_reports_saved(store):
     assert "no renderer" in result["render_error"]
     assert (await store.read(created.ref)).content == "bye"
     assert "no renderer" in json.loads(await toolset.render(created.ref))["error"]
+
+
+@pytest.mark.asyncio
+async def test_tools_call_through_agent_tool(store, toolset):
+    ext = await _make(store, toolset, "a\nb\n")
+    tools = {tool.name: tool for tool in toolset.tools()}
+    assert set(tools) == {
+        "artifact_view",
+        "artifact_str_replace",
+        "artifact_insert",
+        "artifact_edit",
+        "artifact_render",
+    }
+    result = json.loads(
+        await tools["artifact_insert"].fn(
+            datasette=None, actor=None, artifact_id=ext, insert_line=1, insert_text="X"
+        )
+    )
+    assert "error" not in result
+    viewed = json.loads(
+        await tools["artifact_view"].fn(datasette=None, actor=None, artifact_id=ext)
+    )
+    assert viewed["content"] == "1:\ta\n2:\tX\n3:\tb"

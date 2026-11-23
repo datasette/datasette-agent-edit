@@ -78,3 +78,34 @@ def test_apply_edits_partial_failure():
 def test_apply_edits_unknown_operation():
     with pytest.raises(EditError, match="unknown operation"):
         apply_edits("test", [{"operation": "delete"}])
+
+
+# --- Line handling ---
+
+
+def test_view_lines_keeps_trailing_whitespace():
+    assert view_lines("a  \n\tb\t\n") == "1:\ta  \n2:\t\tb\t"
+
+
+def test_view_lines_only_breaks_on_newlines():
+    assert view_lines("a\x0cb c\r\nd\n") == "1:\ta\x0cb c\n2:\td"
+
+
+@pytest.mark.parametrize(
+    "view_range,match",
+    [
+        ("2", "invalid view_range"),
+        ("x,y", "invalid view_range"),
+        ("1,2,3", "invalid view_range"),
+        ("0,2", "start must be 1 or greater"),
+        ("3,2", "before start"),
+        ("9,-1", "past the end"),
+    ],
+)
+def test_view_lines_bad_range(view_range, match):
+    with pytest.raises(EditError, match=match):
+        view_lines("a\nb\nc\n", view_range)
+
+
+def test_view_lines_range_on_empty_content():
+    assert view_lines("", "1,-1") == ""

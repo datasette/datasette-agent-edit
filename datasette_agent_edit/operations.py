@@ -31,21 +31,61 @@ class EditApplyError(EditError):
         self.index = index
 
 
+def _split_lines(content):
+    """Split ``content`` into lines, keeping line endings.
+
+    Only a line feed (so also CRLF) ends a line. ``str.splitlines`` also
+    breaks on form feeds and Unicode separators, which would make line
+    numbers disagree with every editor.
+    """
+    pieces = content.split("\n")
+    lines = [piece + "\n" for piece in pieces[:-1]]
+    if pieces[-1]:
+        lines.append(pieces[-1])
+    return lines
+
+
+def _parse_view_range(view_range, total_lines):
+    """Return ``(start, end)`` for a ``"start,end"`` string, or raise."""
+    parts = [part.strip() for part in str(view_range).split(",")]
+    try:
+        if len(parts) != 2:
+            raise ValueError
+        start, end = int(parts[0]), int(parts[1])
+    except ValueError:
+        raise EditError(
+            f'invalid view_range {view_range!r}; use "start,end" '
+            "(1-indexed, -1 for end-of-file)"
+        ) from None
+    if start < 1:
+        raise EditError(f"view_range start must be 1 or greater, got {start}")
+    if start > max(total_lines, 1):
+        raise EditError(
+            f"view_range start ({start}) is past the end; "
+            f"content has {total_lines} lines"
+        )
+    if end == -1:
+        end = max(total_lines, start)
+    if end < start:
+        raise EditError(
+            f"view_range end ({end}) is before start ({start}); "
+            f"content has {total_lines} lines"
+        )
+    return start, end
+
+
 def view_lines(content, view_range=""):
     """Format ``content`` as numbered lines, optionally sliced to a range.
 
     ``view_range`` is a string ``"start,end"`` (1-indexed, inclusive). An end
-    of ``-1`` means end-of-file. An empty string returns every line.
+    of ``-1`` means end-of-file. An empty string returns every line. A
+    malformed or impossible range raises :class:`EditError`. Trailing
+    whitespace is preserved so the output can be copied into ``str_replace``.
     """
-    all_lines = content.splitlines(True)
-    total_lines = len(all_lines)
+    all_lines = _split_lines(content)
 
     if view_range:
-        parts = view_range.split(",")
-        start = int(parts[0])
-        end = int(parts[1])
-        if end == -1:
-            end = total_lines
+        start, end = _parse_view_range(view_range, len(all_lines))
         lines = all_lines[start - 1 : end]
         start_num = start
     else:
@@ -54,7 +94,8 @@ def view_lines(content, view_range=""):
 
     numbered = []
     for i, line in enumerate(lines, start=start_num):
-        numbered.append(f"{i}:\t{line.rstrip()}")
+        text = line.rstrip("\r\n")
+        numbered.append(f"{i}:\t{text}")
     return "\n".join(numbered)
 
 

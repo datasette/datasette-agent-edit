@@ -272,6 +272,9 @@ class EditToolset:
                                     "insert_text": {"type": "string"},
                                 },
                                 "required": ["operation"],
+                                "description": "str_replace needs old_str and "
+                                "new_str; insert needs insert_line and "
+                                "insert_text",
                             },
                         },
                     },

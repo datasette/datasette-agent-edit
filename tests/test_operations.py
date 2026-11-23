@@ -131,3 +131,27 @@ def test_insert_into_empty_content():
 def test_insert_rejects_bad_line(insert_line):
     with pytest.raises(EditError, match="insert_line"):
         insert("a\nb\n", insert_line, "X\n")
+
+
+# --- Malformed edits ---
+
+
+@pytest.mark.parametrize(
+    "edit,match",
+    [
+        ({"operation": "str_replace", "old_str": "a"}, "missing required.*new_str"),
+        ({"operation": "insert", "insert_text": "x"}, "missing required.*insert_line"),
+        ({"operation": "str_replace", "old_str": "a", "new_str": 1}, "must be strings"),
+        ({"operation": "insert", "insert_line": "1", "insert_text": "x"}, "integer"),
+        ("str_replace", "must be an object"),
+    ],
+)
+def test_apply_edits_malformed_edit(edit, match):
+    with pytest.raises(EditApplyError, match=match) as exc:
+        apply_edits("abc", [edit])
+    assert exc.value.index == 0
+
+
+def test_apply_edits_rejects_non_list():
+    with pytest.raises(EditError, match="array"):
+        apply_edits("abc", {"operation": "insert"})

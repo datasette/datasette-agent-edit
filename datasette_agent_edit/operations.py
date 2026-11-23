@@ -105,6 +105,8 @@ def str_replace(content, old_str, new_str):
     Raises :class:`EditError` if ``old_str`` is absent or appears more than
     once (the caller should add surrounding context to disambiguate).
     """
+    if not isinstance(old_str, str) or not isinstance(new_str, str):
+        raise EditError("old_str and new_str must be strings")
     count = content.count(old_str)
     if count == 0:
         raise EditError("old_str not found in content")
@@ -142,6 +144,12 @@ def insert(content, insert_line, insert_text):
     return "".join(before) + insert_text + "".join(after)
 
 
+def _require(edit, op, *keys):
+    missing = [key for key in keys if key not in edit]
+    if missing:
+        raise EditError(f"{op} edit is missing required key(s): {', '.join(missing)}")
+
+
 def apply_edit(content, edit):
     """Apply a single ``{"operation": ..., ...}`` edit dict to ``content``.
 
@@ -149,11 +157,18 @@ def apply_edit(content, edit):
 
     - ``str_replace``: keys ``old_str``, ``new_str``
     - ``insert``: keys ``insert_line``, ``insert_text``
+
+    A malformed edit (not a dict, unknown operation, missing keys, wrong
+    types) raises :class:`EditError`.
     """
+    if not isinstance(edit, dict):
+        raise EditError(f"each edit must be an object, got {type(edit).__name__}")
     op = edit.get("operation")
     if op == "str_replace":
+        _require(edit, op, "old_str", "new_str")
         return str_replace(content, edit["old_str"], edit["new_str"])
     if op == "insert":
+        _require(edit, op, "insert_line", "insert_text")
         return insert(content, edit["insert_line"], edit["insert_text"])
     raise EditError(
         f"unknown operation {op!r}. Use 'str_replace' or 'insert'."
@@ -169,11 +184,12 @@ def apply_edits(content, edits):
     ``applied`` is a list of strings like ``"str_replace #1: OK"``.
     """
     applied = []
+    if not isinstance(edits, (list, tuple)):
+        raise EditError("edits must be an array of edit objects")
     for i, edit in enumerate(edits):
-        op = edit.get("operation")
         try:
             content = apply_edit(content, edit)
         except EditError as e:
             raise EditApplyError(str(e), applied=applied, index=i) from e
-        applied.append(f"{op} #{i + 1}: OK")
+        applied.append(f"{edit['operation']} #{i + 1}: OK")
     return content, applied

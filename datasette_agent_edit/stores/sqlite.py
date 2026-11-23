@@ -7,6 +7,8 @@ read-modify-write is a single serialised transaction with no chance of another
 edit interleaving — and no ``await`` is possible (or needed) in that context.
 """
 
+import json
+import sqlite3
 from datetime import datetime, timezone
 
 from ulid import ULID
@@ -79,8 +81,6 @@ CREATE TABLE IF NOT EXISTS {self.versions_table} (
             self._ensured = True
 
     async def create(self, content, *, ref=None, metadata=None):
-        import json
-
         metadata = metadata or {}
         if self.validate_metadata is not None:
             self.validate_metadata(metadata)
@@ -90,22 +90,28 @@ CREATE TABLE IF NOT EXISTS {self.versions_table} (
         now = _now()
         metadata_json = json.dumps(metadata)
 
-        await self.db.execute_write(
-            f"INSERT INTO {self.table} "
-            "(id, metadata, current_version, created_at, updated_at) "
-            "VALUES (?, ?, 1, ?, ?)",
-            [object_id, metadata_json, now, now],
-        )
-        await self.db.execute_write(
-            f"INSERT INTO {self.versions_table} "
-            "(object_id, version, content, created_at) VALUES (?, 1, ?, ?)",
-            [object_id, content, now],
-        )
+        def _write(conn):
+            # Both rows in one transaction, so a failure can never leave an
+            # object without its first version.
+            try:
+                conn.execute(
+                    f"INSERT INTO {self.table} "
+                    "(id, metadata, current_version, created_at, updated_at) "
+                    "VALUES (?, ?, 1, ?, ?)",
+                    [object_id, metadata_json, now, now],
+                )
+            except sqlite3.IntegrityError:
+                raise FileExistsError(object_id) from None
+            conn.execute(
+                f"INSERT INTO {self.versions_table} "
+                "(object_id, version, content, created_at) VALUES (?, 1, ?, ?)",
+                [object_id, content, now],
+            )
+
+        await self.db.execute_write_fn(_write)
         return Editable(ref=object_id, content=content, metadata=metadata, version=1)
 
     async def read(self, ref):
-        import json
-
         await self.ensure_tables()
         row = (
             await self.db.execute(
@@ -126,8 +132,6 @@ CREATE TABLE IF NOT EXISTS {self.versions_table} (
         )
 
     async def edit(self, ref, transform: Transform):
-        import json
-
         await self.ensure_tables()
         now = _now()
 

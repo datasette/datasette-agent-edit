@@ -142,6 +142,38 @@ async def test_disk_version_changes_on_edit(disk_store):
     assert edited.content == "ab"
 
 
+# --- Fixes: shared contract ---
+
+
+@pytest.mark.asyncio
+async def test_create_duplicate_ref_raises(store):
+    await store.create("one", ref="dup.txt")
+    with pytest.raises(FileExistsError):
+        await store.create("two", ref="dup.txt")
+    assert (await store.read("dup.txt")).content == "one"
+
+
+# --- Fixes: SQLite ---
+
+
+@pytest.mark.asyncio
+async def test_sqlite_create_is_atomic():
+    db = Datasette(memory=True).get_internal_database()
+    store = SqliteVersionedStore(db)
+    await store.ensure_tables()
+    # Force the second insert to fail: the first must roll back with it.
+    await db.execute_write(
+        "CREATE TRIGGER boom BEFORE INSERT ON datasette_agent_edit_versions "
+        "BEGIN SELECT RAISE(ABORT, 'boom'); END"
+    )
+    with pytest.raises(Exception, match="boom"):
+        await store.create("x", ref="r1")
+    count = (
+        await db.execute("select count(*) from datasette_agent_edit_objects")
+    ).first()[0]
+    assert count == 0
+
+
 # --- Fixes: disk ---
 
 

@@ -67,7 +67,8 @@ class EditStore(Protocol):
 
         ``ref`` may be supplied for path-addressed backends (disk, S3,
         GitHub); id-generating backends (SQLite) generate one when it is
-        ``None``.
+        ``None``. Raises :class:`FileExistsError` if ``ref`` is already
+        taken.
         """
         ...
 

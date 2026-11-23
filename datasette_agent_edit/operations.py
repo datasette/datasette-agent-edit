@@ -114,14 +114,32 @@ def str_replace(content, old_str, new_str):
 
 
 def insert(content, insert_line, insert_text):
-    """Insert ``insert_text`` after line number ``insert_line``.
+    """Insert ``insert_text`` as whole lines after line number ``insert_line``.
 
-    ``insert_line=0`` inserts at the very beginning of the content.
+    ``insert_line=0`` inserts at the very beginning of the content, and the
+    number of lines in the content appends at the end; anything outside that
+    range raises :class:`EditError`. Line breaks are added where needed so the
+    inserted text never runs into the line before or after it.
     """
-    lines = content.splitlines(True)
-    insert_pieces = insert_text.splitlines(True)
-    new_lines = lines[:insert_line] + insert_pieces + lines[insert_line:]
-    return "".join(new_lines)
+    if isinstance(insert_line, bool) or not isinstance(insert_line, int):
+        raise EditError(f"insert_line must be an integer, got {insert_line!r}")
+    if not isinstance(insert_text, str):
+        raise EditError("insert_text must be a string")
+    lines = _split_lines(content)
+    if not 0 <= insert_line <= len(lines):
+        raise EditError(
+            f"insert_line {insert_line} is out of range; content has "
+            f"{len(lines)} lines (use 0 to {len(lines)})"
+        )
+    if not insert_text:
+        return content
+    before, after = lines[:insert_line], lines[insert_line:]
+    newline = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
+    if before and not before[-1].endswith("\n"):
+        before[-1] += newline
+    if after and not insert_text.endswith("\n"):
+        insert_text += newline
+    return "".join(before) + insert_text + "".join(after)
 
 
 def apply_edit(content, edit):

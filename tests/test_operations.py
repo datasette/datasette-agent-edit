@@ -109,3 +109,25 @@ def test_view_lines_bad_range(view_range, match):
 
 def test_view_lines_range_on_empty_content():
     assert view_lines("", "1,-1") == ""
+
+
+def test_insert_adds_newline_before_following_line():
+    assert insert("a\nb\n", 1, "X") == "a\nX\nb\n"
+
+
+def test_insert_after_last_line_without_trailing_newline():
+    assert insert("a\nb", 2, "c") == "a\nb\nc"
+
+
+def test_insert_matches_crlf_content():
+    assert insert("a\r\nb\r\n", 1, "X") == "a\r\nX\r\nb\r\n"
+
+
+def test_insert_into_empty_content():
+    assert insert("", 0, "X") == "X"
+
+
+@pytest.mark.parametrize("insert_line", [-1, 3, 99, "1", 1.0, True, None])
+def test_insert_rejects_bad_line(insert_line):
+    with pytest.raises(EditError, match="insert_line"):
+        insert("a\nb\n", insert_line, "X\n")

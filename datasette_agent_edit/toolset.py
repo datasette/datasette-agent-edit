@@ -242,7 +242,7 @@ class EditToolset:
                         },
                         "insert_text": {
                             "type": "string",
-                            "description": "Text to insert",
+                            "description": "Text to insert as whole lines",
                         },
                     },
                     "required": [idf, "insert_line", "insert_text"],
@@ -317,8 +317,8 @@ class EditToolset:
                 "(add surrounding context to disambiguate)." + edit_note
             ),
             "insert": (
-                "Insert text after a given line number (0 for the beginning "
-                "of the content)." + edit_note
+                "Insert text as new lines after a given line number (0 for "
+                "the beginning of the content)." + edit_note
             ),
             "edit": (
                 "Apply multiple edits in one atomic operation. Pass an array "

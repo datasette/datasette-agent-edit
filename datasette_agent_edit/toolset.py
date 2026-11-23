@@ -50,8 +50,10 @@ class EditToolset:
     def _name(self, op):
         return f"{self.name_prefix}_{op}"
 
-    def _ok(self, external_id, **extra):
-        return json.dumps({self.id_field: external_id, **extra})
+    def _ok(self, external_id, payload=None, **extra):
+        # Render-hook keys go in first so they can never displace the id,
+        # version or status fields the toolset itself reports.
+        return json.dumps({**(payload or {}), self.id_field: external_id, **extra})
 
     def _err(self, message, **extra):
         return json.dumps({"error": message, **extra})
@@ -62,7 +64,7 @@ class EditToolset:
         result = self.render_hook(editable)
         if inspect.isawaitable(result):
             result = await result
-        return result or {}
+        return dict(result or {})
 
     async def _read(self, external_id):
         """Return ``(editable, None)`` or ``(None, error_json)``."""
@@ -162,13 +164,23 @@ class EditToolset:
             return error
 
         applied = holder.get("applied", [])
-        payload = await self._render_payload(editable)
+        status = f"Applied {len(applied)} edits."
+        extra = {}
+        # The edits are already saved, so a broken render hook must not make
+        # this look like a failed edit -- the model would retry it.
+        try:
+            payload = await self._render_payload(editable)
+        except Exception as e:
+            payload = {}
+            extra["render_error"] = f"{type(e).__name__}: {e}"
+            status += " The edits were saved, but rendering failed."
         return self._ok(
             external_id,
+            payload,
             version=editable.version,
             edits_applied=len(applied),
-            status=f"Applied {len(applied)} edits.",
-            **payload,
+            status=status,
+            **extra,
         )
 
     async def render(self, external_id):
@@ -181,7 +193,7 @@ class EditToolset:
             payload = await self._render_payload(editable)
         except Exception as e:
             return self._err(f"Rendering failed: {type(e).__name__}: {e}")
-        return self._ok(external_id, status="Rendered.", **payload)
+        return self._ok(external_id, payload, status="Rendered.")
 
     # ------------------------------------------------------------------ #
     # AgentTool construction

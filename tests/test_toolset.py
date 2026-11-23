@@ -219,3 +219,44 @@ async def test_disk_store_errors_are_enveloped(tmp_path):
     assert "escapes" in json.loads(await toolset.str_replace("../x", "a", "b"))["error"]
     assert "invalid ref" in json.loads(await toolset.view(""))["error"]
     assert "UTF-8" in json.loads(await toolset.view("b.bin"))["error"]
+
+
+@pytest.mark.asyncio
+async def test_render_hook_cannot_override_core_fields(store):
+    toolset = EditToolset(
+        store, render=lambda e: {"status": "mine", "id": "spoof", "_html": "x"}
+    )
+    created = await store.create("hello")
+    result = json.loads(
+        await toolset.edit(
+            created.ref,
+            [{"operation": "str_replace", "old_str": "hello", "new_str": "bye"}],
+        )
+    )
+    assert result["id"] == created.ref
+    assert result["status"] == "Applied 1 edits."
+    assert result["_html"] == "x"
+    rendered = json.loads(await toolset.render(created.ref))
+    assert rendered["id"] == created.ref
+    assert rendered["status"] == "Rendered."
+
+
+@pytest.mark.asyncio
+async def test_render_failure_after_edit_reports_saved(store):
+    def boom(editable):
+        raise RuntimeError("no renderer")
+
+    toolset = EditToolset(store, render=boom)
+    created = await store.create("hello")
+    result = json.loads(
+        await toolset.edit(
+            created.ref,
+            [{"operation": "str_replace", "old_str": "hello", "new_str": "bye"}],
+        )
+    )
+    assert "error" not in result
+    assert result["edits_applied"] == 1
+    assert "saved" in result["status"]
+    assert "no renderer" in result["render_error"]
+    assert (await store.read(created.ref)).content == "bye"
+    assert "no renderer" in json.loads(await toolset.render(created.ref))["error"]

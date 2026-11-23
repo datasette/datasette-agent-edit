@@ -64,33 +64,60 @@ class EditToolset:
             result = await result
         return result or {}
 
+    async def _read(self, external_id):
+        """Return ``(editable, None)`` or ``(None, error_json)``."""
+        try:
+            ref = self.codec.to_internal(external_id)
+            return await self.store.read(ref), None
+        except NotFound:
+            return None, self._err(f"Content not found: {external_id}")
+        except ValueError as e:
+            return None, self._err(str(e))
+
+    async def _edit(self, external_id, transform):
+        """Run ``transform`` through the store.
+
+        Returns ``(editable, None)`` or ``(None, error_json)``. Every
+        ``ValueError`` -- a failed edit, or a store rejecting the ref or the
+        content -- becomes an error envelope rather than an exception.
+        """
+        try:
+            ref = self.codec.to_internal(external_id)
+            return await self.store.edit(ref, transform), None
+        except NotFound:
+            return None, self._err(f"Content not found: {external_id}")
+        except EditApplyError as e:
+            return None, self._err(
+                f"Edit #{e.index + 1} failed: {e}", applied=e.applied
+            )
+        except ValueError as e:
+            return None, self._err(str(e))
+
     # ------------------------------------------------------------------ #
     # Handlers (directly callable; each returns a JSON string)
     # ------------------------------------------------------------------ #
     async def view(self, external_id, view_range=""):
-        ref = self.codec.to_internal(external_id)
+        editable, error = await self._read(external_id)
+        if error:
+            return error
         try:
-            editable = await self.store.read(ref)
-        except NotFound:
-            return self._err(f"Content not found: {external_id}")
+            content = operations.view_lines(editable.content, view_range)
+        except EditError as e:
+            return self._err(str(e))
         return self._ok(
             external_id,
+            version=editable.version,
             metadata=editable.metadata,
-            content=operations.view_lines(editable.content, view_range),
+            content=content,
         )
 
     async def str_replace(self, external_id, old_str, new_str):
-        ref = self.codec.to_internal(external_id)
-
         def transform(content):
             return operations.str_replace(content, old_str, new_str)
 
-        try:
-            editable = await self.store.edit(ref, transform)
-        except NotFound:
-            return self._err(f"Content not found: {external_id}")
-        except EditError as e:
-            return self._err(str(e))
+        editable, error = await self._edit(external_id, transform)
+        if error:
+            return error
         return self._ok(
             external_id,
             version=editable.version,
@@ -103,17 +130,12 @@ class EditToolset:
         )
 
     async def insert(self, external_id, insert_line, insert_text):
-        ref = self.codec.to_internal(external_id)
-
         def transform(content):
             return operations.insert(content, insert_line, insert_text)
 
-        try:
-            editable = await self.store.edit(ref, transform)
-        except NotFound:
-            return self._err(f"Content not found: {external_id}")
-        except EditError as e:
-            return self._err(str(e))
+        editable, error = await self._edit(external_id, transform)
+        if error:
+            return error
         return self._ok(
             external_id,
             version=editable.version,
@@ -126,7 +148,8 @@ class EditToolset:
         )
 
     async def edit(self, external_id, edits):
-        ref = self.codec.to_internal(external_id)
+        if not isinstance(edits, (list, tuple)) or not edits:
+            return self._err("edits must be a non-empty array of edit objects")
         holder = {}
 
         def transform(content):
@@ -134,16 +157,9 @@ class EditToolset:
             holder["applied"] = applied
             return new_content
 
-        try:
-            editable = await self.store.edit(ref, transform)
-        except NotFound:
-            return self._err(f"Content not found: {external_id}")
-        except EditApplyError as e:
-            return self._err(
-                f"Edit #{e.index + 1} failed: {e}", applied=e.applied
-            )
-        except EditError as e:
-            return self._err(str(e))
+        editable, error = await self._edit(external_id, transform)
+        if error:
+            return error
 
         applied = holder.get("applied", [])
         payload = await self._render_payload(editable)
@@ -158,12 +174,13 @@ class EditToolset:
     async def render(self, external_id):
         if self.render_hook is None:
             return self._err("This toolset has no render hook configured.")
-        ref = self.codec.to_internal(external_id)
+        editable, error = await self._read(external_id)
+        if error:
+            return error
         try:
-            editable = await self.store.read(ref)
-        except NotFound:
-            return self._err(f"Content not found: {external_id}")
-        payload = await self._render_payload(editable)
+            payload = await self._render_payload(editable)
+        except Exception as e:
+            return self._err(f"Rendering failed: {type(e).__name__}: {e}")
         return self._ok(external_id, status="Rendered.", **payload)
 
     # ------------------------------------------------------------------ #

@@ -174,6 +174,27 @@ async def test_sqlite_create_is_atomic():
     assert count == 0
 
 
+@pytest.mark.asyncio
+async def test_sqlite_delete_with_foreign_keys_enforced(sqlite_store):
+    created = await sqlite_store.create("x")
+    await sqlite_store.edit(created.ref, lambda c: c + "y")
+
+    def _delete_with_fks(conn):
+        conn.execute("PRAGMA foreign_keys = ON")
+
+    await sqlite_store.db.execute_write_fn(_delete_with_fks, transaction=False)
+    try:
+        await sqlite_store.delete(created.ref)
+    finally:
+        await sqlite_store.db.execute_write_fn(
+            lambda conn: conn.execute("PRAGMA foreign_keys = OFF"), transaction=False
+        )
+    with pytest.raises(NotFound):
+        await sqlite_store.read(created.ref)
+    with pytest.raises(NotFound):
+        await sqlite_store.delete(created.ref)
+
+
 # --- Fixes: disk ---
 
 

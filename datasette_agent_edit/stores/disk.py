@@ -117,6 +117,8 @@ class DiskStore:
             current = self._read_sync(ref)  # raises NotFound if missing
             # Pure, synchronous surgery between read and atomic replace.
             new_content = transform(current.content)
+            if new_content == current.content:
+                return current  # nothing changed: leave the file untouched
             self._write_sync(path, new_content)
             return Editable(
                 ref=ref,

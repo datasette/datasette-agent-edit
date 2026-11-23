@@ -84,7 +84,9 @@ class EditStore(Protocol):
 
         The backend reads the current content, applies ``transform`` inside
         its critical section, persists the result and returns the new
-        :class:`Editable`. If ``transform`` raises, nothing is persisted.
+        :class:`Editable`. If ``transform`` raises, nothing is persisted, and
+        a transform that returns the content unchanged leaves ``version``
+        as it was.
         Raises :class:`NotFound` if ``ref`` does not exist and
         :class:`Conflict` if the write could not be committed.
         """
